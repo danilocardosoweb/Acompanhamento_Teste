@@ -15,17 +15,34 @@ foreach ($store in $ns.Stores) {
 }
 if ($found.Count -ne 1) { throw "Encontradas $($found.Count) pastas Testes Qualidade. Configure uma conta unica antes de coletar." }
 $folder = $found[0]
-$records = @(); $warnings = @(); $skipped = 0
+$records = @(); $warnings = @(); $skipped = 0; $newCount = 0
 $old = @{}
 $jsonPath = Join-Path $dataDir 'testes.json'
 if (Test-Path $jsonPath) { foreach ($r in (Get-Content $jsonPath -Raw -Encoding UTF8 | ConvertFrom-Json).records) { $old[$r.id] = $r } }
-foreach ($mail in $folder.Items) {
+$statePath = Join-Path $dataDir 'coleta-state.json'
+$lastReceived = $null
+if (Test-Path $statePath) {
+  try { $lastReceived = [datetime](Get-Content $statePath -Raw -Encoding UTF8 | ConvertFrom-Json).lastReceived } catch {}
+}
+if (-not $lastReceived -and $old.Count) {
+  $lastReceived = [datetime](($old.Values | Sort-Object {[datetime]$_.received} -Descending | Select-Object -First 1).received)
+}
+$items = $folder.Items
+if ($lastReceived) {
+  # Revisit a short window so delayed Outlook synchronization cannot create gaps.
+  $since = $lastReceived.AddHours(-48).ToString('MM/dd/yyyy HH:mm',[Globalization.CultureInfo]::InvariantCulture)
+  $items = $items.Restrict("[ReceivedTime] >= '$since'")
+}
+$items.Sort('[ReceivedTime]', $true)
+foreach ($mail in $items) {
   if ($mail.Class -ne 43 -or $mail.Subject -notmatch '^TESTE\b') { $skipped++; continue }
   $id = $null
   try {
     $hash = [Security.Cryptography.SHA256]::Create()
     $id = ([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($folder.StoreID + $mail.EntryID)))).Replace('-','').ToLower()
     $hash.Dispose()
+    # The overlap is intentional; the stable Outlook ID prevents re-reading an imported message.
+    if ($old.ContainsKey($id)) { continue }
     $subject = [string]$mail.Subject
     $body = ([string]$mail.Body).Trim()
     $normalized = $subject.Normalize([Text.NormalizationForm]::FormD) -replace '\p{Mn}', ''
@@ -58,7 +75,10 @@ foreach ($mail in $folder.Items) {
       $a.SaveAsFile($dest)
       $attachments += @{name=$name; path=$relative; size=$a.Size}
     }
-    $records += @{id=$id; tool=$tool; sequence=$seq; test=$test; testDate=$date; received=$mail.ReceivedTime.ToString('yyyy-MM-ddTHH:mm:ss'); status=$status; subject=$subject; comment=$comment; body=$body; sender=[string]$mail.SenderName; attachments=@($attachments)}
+    # SenderName is deliberately not read: Outlook treats it as protected address data
+    # and may display one security prompt for every message.
+    $records += @{id=$id; tool=$tool; sequence=$seq; test=$test; testDate=$date; received=$mail.ReceivedTime.ToString('yyyy-MM-ddTHH:mm:ss'); status=$status; subject=$subject; comment=$comment; body=$body; sender=''; attachments=@($attachments)}
+    $newCount++
   } catch {
     $warnings += "Falha ao importar '$($mail.Subject)': $($_.Exception.Message)"
     if ($id -and $old.ContainsKey($id)) { $records += $old[$id] }
@@ -71,4 +91,7 @@ $result = @{updatedAt=(Get-Date).ToString('o'); source=$folder.FolderPath; skipp
 $temp = Join-Path $dataDir 'testes.tmp'
 [IO.File]::WriteAllText($temp, ($result | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
 Move-Item -LiteralPath $temp -Destination $jsonPath -Force
-Write-Output "Importados $($records.Count) registros; $($warnings.Count) avisos."
+$watermark = if ($result.records.Count) { ($result.records | Sort-Object {[datetime]$_.received} -Descending | Select-Object -First 1).received } else { $null }
+$state = @{lastReceived=$watermark; lastRun=(Get-Date).ToString('o'); totalRecords=$result.records.Count}
+[IO.File]::WriteAllText($statePath,($state | ConvertTo-Json),(New-Object Text.UTF8Encoding($false)))
+Write-Output "Coleta incremental concluida: $newCount novo(s), $($records.Count) no historico; $($warnings.Count) aviso(s)."

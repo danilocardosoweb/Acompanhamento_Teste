@@ -5,7 +5,10 @@ O Outlook classico deve estar configurado no seu usuario do Windows.
 A janela minimizada do painel deve permanecer aberta para servir os arquivos
 e atualizar os dados a cada 15 minutos. Feche-a para encerrar o painel.
 
-O botao Atualizar e-mails executa a coleta imediatamente.
+O botao Atualizar e-mails executa uma coleta incremental imediatamente.
+Depois da primeira carga, apenas mensagens posteriores ao ultimo e-mail importado
+sao consultadas, com uma margem de 48 horas para evitar lacunas de sincronizacao.
+Mensagens ja registradas sao ignoradas pelo identificador estavel do Outlook.
 Somente assuntos iniciados por TESTE (palavra inteira) sao importados.
 Respostas RES: e RE: nao entram nesta versao.
 Os e-mails nao sao alterados, movidos nem marcados como lidos.
@@ -27,8 +30,8 @@ Ferramentas_em_testes. O painel local consulta os dados confirmados na nuvem.
 O arquivo .cloud-credentials.json e privado deste computador e nao deve ser enviado.
 Ainda nao ha publicacao na Vercel nem acesso da diretoria nesta etapa.
 
-ABA CORRECOES
-A aba Correcoes consulta os registros do sistema e mostra apenas ferramentas e
+ABA APONTAMENTOS
+A aba Apontamentos consulta os registros do sistema e mostra apenas ferramentas e
 sequencias que tambem existem no acompanhamento de testes. Os arquivos vinculados
 a correcoes ficam no bucket privado quality-files. PDF e video podem ser abertos
 no navegador; Excel fica disponivel para baixar. O limite por arquivo e 200 MB.
