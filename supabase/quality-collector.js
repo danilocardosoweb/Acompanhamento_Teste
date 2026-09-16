@@ -29,6 +29,17 @@ Deno.serve(async req=>{
    if(!users.length)return respond({error:'Usuário ou senha inválidos.'},401);
    return respond({user:{id:users[0].user_id,email:users[0].email,name:users[0].name,role:users[0].role}});
   }
+  if(action==='correction'&&req.method==='POST') {
+   const body=await req.json(),id=String(body.id||''),userId=String(body.userId||''),text=String(body.text||'').trim();
+   if(!/^[0-9a-f-]{36}$/.test(id)||!/^[0-9a-f-]{36}$/.test(userId)||text.length>10000)return respond({error:'Dados de correção inválidos.'},400);
+   await api('/rest/v1/quality_correction_actions?on_conflict=correction_id',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'},body:JSON.stringify({correction_id:id,correction_text:text,corrected_at:new Date().toISOString(),corrected_by:userId,corrected_by_name:String(body.userName||'').slice(0,200),updated_at:new Date().toISOString()})});
+   if(body.file) {
+    const f=body.file;
+    if(!validPath(f.objectPath)||!f.objectPath.startsWith(`corrections/${id}/`)||!/^.+\.(xlsx|xls|xlsm|xlsb|pdf)$/i.test(f.name)||!Number.isSafeInteger(f.size)||f.size<1||f.size>25*1024*1024)return respond({error:'Arquivo inválido.'},400);
+    await api('/rest/v1/quality_correction_files?on_conflict=object_path',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'},body:JSON.stringify({correction_id:id,name:String(f.name).slice(0,255),object_path:f.objectPath,size_bytes:f.size,mime_type:String(f.mimeType||'application/octet-stream').slice(0,120)})});
+   }
+   return respond({ok:true});
+  }
   if(action==='file') {
    const object=url.searchParams.get('path')||'';
    if(!validPath(object))return respond({error:'Invalid path'},400);

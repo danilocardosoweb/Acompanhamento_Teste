@@ -12,6 +12,7 @@ const sessions=new Map();
 function cookies(req){return Object.fromEntries(String(req.headers.cookie||'').split(';').map(v=>v.trim().split('=').map(decodeURIComponent)).filter(v=>v.length===2));}
 function authenticated(req){const token=cookies(req).quality_session,session=token&&sessions.get(token);if(!session||session.expires<Date.now()){if(token)sessions.delete(token);return null;}return session.user;}
 function readBody(req,limit=4096){return new Promise((resolve,reject)=>{let body='';req.on('data',d=>{body+=d;if(body.length>limit){reject(Error('Requisição muito grande.'));req.destroy();}});req.on('end',()=>resolve(body));req.on('error',reject);});}
+function correctionFile(input){if(!input)return null;const name=path.basename(String(input.name||'')),ext=path.extname(name).toLowerCase();if(!['.xlsx','.xls','.xlsm','.xlsb','.pdf'].includes(ext))throw Error('Selecione um arquivo Excel ou PDF.');const bytes=Buffer.from(String(input.data||''),'base64');if(!bytes.length||bytes.length>25*1024*1024)throw Error('O arquivo deve ter até 25 MB.');const pdf=bytes.subarray(0,5).toString()==='%PDF-',zip=bytes[0]===0x50&&bytes[1]===0x4b,ole=bytes.subarray(0,8).equals(Buffer.from([0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1]));if(ext==='.pdf'?!pdf:!(zip||ole))throw Error('O conteúdo do arquivo não corresponde ao formato selecionado.');const mime=ext==='.pdf'?'application/pdf':ext==='.xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'application/vnd.ms-excel';return {name,bytes,mimeType:mime};}
 function attachment(url) {
   const data=JSON.parse(fs.readFileSync(path.join(root,'dados/testes.json'),'utf8'));
   const record=data.records.find(r=>r.id===url.searchParams.get('id'));
@@ -22,8 +23,7 @@ function attachment(url) {
   if(!source.startsWith(path.join(root,'anexos')+path.sep)) throw new Error('Caminho inválido.');
   return {item,source};
 }
-function preview(url) {
-  const {item,source}=attachment(url);
+function renderPreview(item,source) {
   if(!/\.(xlsx|xls|xlsm|xlsb|pdf)$/i.test(source)) throw new Error('Visualização não disponível para este formato.');
   const key=crypto.createHash('sha256').update('preview-v1').update(fs.readFileSync(source)).digest('hex');
   const dir=path.join(root,'previews',key), manifest=path.join(dir,'manifest.json');
@@ -42,6 +42,18 @@ function preview(url) {
   previewJobs.set(key,job);
   job.finally(()=>previewJobs.delete(key)).catch(()=>{});
   return job;
+}
+function preview(url) {const {item,source}=attachment(url);return renderPreview(item,source);}
+async function correctionPreview(url){
+  if(!cloud.enabled())throw Error('Supabase não configurado.');
+  const item=cloud.findCorrectionFile(url.searchParams.get('id'),Number(url.searchParams.get('index')));
+  if(!item?.objectPath)throw Error('Arquivo não encontrado.');
+  if(!/\.(xlsx|xls|xlsm|xlsb|pdf)$/i.test(item.name))throw Error('Visualização não disponível para este formato.');
+  const downloaded=await cloud.download(item.objectPath),sourceDir=path.join(root,'previews','sources');
+  fs.mkdirSync(sourceDir,{recursive:true});
+  const source=path.join(sourceDir,crypto.createHash('sha256').update(item.objectPath).digest('hex')+path.extname(item.name).toLowerCase());
+  if(!fs.existsSync(source))fs.writeFileSync(source,downloaded.bytes);
+  return renderPreview(item,source);
 }
 function sync() {
   if (syncing) return;
@@ -66,9 +78,10 @@ const server = http.createServer((req,res) => {
     if(req.headers.origin !== `http://127.0.0.1:${port}` || req.headers['x-painel'] !== 'local') return json(res,403,{error:'Origem invalida.'});
     if(url.pathname === '/api/login') {readBody(req).then(async body=>{try{const input=JSON.parse(body),user=await cloud.login(input.email,input.password),token=crypto.randomBytes(32).toString('hex');sessions.set(token,{user,expires:Date.now()+8*60*60*1000});res.setHeader('Set-Cookie',`quality_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800`);json(res,200,{user});}catch(e){json(res,401,{error:'Usuário ou senha inválidos.'});}}).catch(()=>json(res,400,{error:'Dados inválidos.'}));return;}
     if(url.pathname === '/api/logout') {const token=cookies(req).quality_session;if(token)sessions.delete(token);res.setHeader('Set-Cookie','quality_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return json(res,200,{ok:true});}
+    if(url.pathname === '/api/correction') {const user=authenticated(req);if(!user)return json(res,401,{error:'Faça login para registrar a correção.'});readBody(req,36*1024*1024).then(async body=>{try{const input=JSON.parse(body);if(!/^[0-9a-f-]{36}$/.test(String(input.id||''))||String(input.text||'').length>10000)throw Error('Dados inválidos.');await cloud.saveCorrection({id:input.id,text:String(input.text||''),user,file:correctionFile(input.file)});json(res,200,{ok:true});}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
     if(url.pathname === '/api/sync') {if(!authenticated(req))return json(res,401,{error:'Faça login para atualizar os e-mails.'});sync();return json(res,202,{syncing});}
     if(url.pathname === '/api/preview') {
-      try {preview(url).then(result=>json(res,200,result)).catch(e=>json(res,500,{error:e.message}));}catch(e){json(res,400,{error:e.message});}
+      try {(url.searchParams.get('kind')==='correction'?correctionPreview(url):preview(url)).then(result=>json(res,200,result)).catch(e=>json(res,500,{error:e.message}));}catch(e){json(res,400,{error:e.message});}
       return;
     }
     return json(res,404,{});

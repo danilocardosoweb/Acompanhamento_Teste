@@ -27,12 +27,13 @@ document.addEventListener('click',async event=>{
  if(!button)return;
  trigger=button; const request=++previewRequest;
  ve('viewer-title').textContent=button.dataset.name;
- ve('viewer-download').href=`/attachment?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}`;
+ ve('viewer-download').href=button.dataset.kind==='correction'?`/correction-file?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}&mode=download`:`/attachment?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}`;
  ve('viewer-tools').hidden=true;
  ve('viewer-pages').innerHTML='<div class="preview-loading" role="status">Preparando as páginas do documento…<p>A primeira abertura pode levar alguns segundos.</p></div>';
  viewer.showModal();
  try{
-   const response=await fetch(`/api/preview?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}`,{method:'POST',headers:{'X-Painel':'local'}});
+   const kind=button.dataset.kind==='correction'?'&kind=correction':'';
+   const response=await fetch(`/api/preview?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}${kind}`,{method:'POST',headers:{'X-Painel':'local'}});
    const result=await response.json();
    if(request!==previewRequest)return;
    if(!response.ok)throw Error(result.error||'Não foi possível abrir o documento.');
