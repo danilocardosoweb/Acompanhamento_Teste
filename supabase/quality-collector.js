@@ -66,7 +66,9 @@ Deno.serve(async req=>{
    const state=await(await api('/rest/v1/quality_sync_state?id=eq.outlook-pcp&select=data,synced_at')).json();
    const corrections=[];
    for(let offset=0;;offset+=1000){const page=await(await api(`/rest/v1/quality_corrections_view?select=*&order=source_uploaded_at.desc,id&limit=1000&offset=${offset}`)).json();corrections.push(...page);if(page.length<1000)break;}
-   return respond({...state[0]?.data,records,corrections,cloudSyncedAt:state[0]?.synced_at});
+   // The source table name is historical. These rows are production notes,
+   // matched to tests by the exact tool + sequence pair.
+   return respond({...state[0]?.data,records,productionNotes:corrections,corrections,cloudSyncedAt:state[0]?.synced_at});
   }
   return respond({error:'Not found'},404);
  }catch(e){return respond({error:e.message},500);}

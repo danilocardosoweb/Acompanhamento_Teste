@@ -59,6 +59,6 @@ module.exports=function(root){
  }
  async function download(object){const res=await request('file',{object});return {bytes:Buffer.from(await res.arrayBuffer()),type:res.headers.get('content-type')};}
  function findFile(id,index){const r=cached().records.find(r=>r.id===id);return r?.attachments[index];}
- function findCorrectionFile(id,index){const c=(cached().corrections||[]).find(c=>c.id===id);return c?.files[index];}
+ function findCorrectionFile(id,index){const cache=cached(),c=(cache.productionNotes||cache.corrections||[]).find(c=>c.id===id);return c?.files[index];}
  return {sync,read,download,findFile,findCorrectionFile,status:()=>({...state}),enabled:()=>fs.existsSync(credentialPath)};
 };
