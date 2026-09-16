@@ -1,7 +1,7 @@
 const viewer=document.createElement('dialog');
 viewer.className='viewer';
 viewer.setAttribute('aria-label','Visualizar documento');
-viewer.innerHTML=`<div class="viewer-head"><div><strong id="viewer-title"></strong><p>Visualização do relatório · Arquivo original preservado</p></div><button id="viewer-close" aria-label="Fechar visualização">✕ Fechar</button></div><div id="viewer-tools"><div id="sheet-tabs" role="tablist" aria-label="Abas da planilha"></div><div class="zoom-tools"><button id="zoom-out" aria-label="Diminuir zoom">−</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Aumentar zoom">+</button><button id="zoom-fit">Ajustar</button><a id="sheet-pdf" target="_blank" rel="noopener">Abrir PDF</a></div></div><div id="viewer-pages" role="tabpanel" tabindex="0"></div>`;
+viewer.innerHTML=`<div class="viewer-head"><div><strong id="viewer-title"></strong><p>Visualização do relatório · Arquivo original preservado</p></div><div class="viewer-head-actions"><a id="viewer-download">↓ Baixar original</a><button id="viewer-close" aria-label="Fechar visualização">✕ Fechar</button></div></div><div id="viewer-tools"><div id="sheet-tabs" role="tablist" aria-label="Abas da planilha"></div><div class="zoom-tools"><button id="zoom-out" aria-label="Diminuir zoom">−</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Aumentar zoom">+</button><button id="zoom-fit">Ajustar</button><a id="sheet-pdf" target="_blank" rel="noopener">Abrir PDF</a></div></div><div id="viewer-pages" role="tabpanel" tabindex="0"></div>`;
 document.body.appendChild(viewer);
 let previewRequest=0, previewData=null, previewSheet=0, previewZoom=100, trigger=null;
 const ve=id=>document.getElementById(id);
@@ -27,6 +27,7 @@ document.addEventListener('click',async event=>{
  if(!button)return;
  trigger=button; const request=++previewRequest;
  ve('viewer-title').textContent=button.dataset.name;
+ ve('viewer-download').href=`/attachment?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}`;
  ve('viewer-tools').hidden=true;
  ve('viewer-pages').innerHTML='<div class="preview-loading" role="status">Preparando as páginas do documento…<p>A primeira abertura pode levar alguns segundos.</p></div>';
  viewer.showModal();

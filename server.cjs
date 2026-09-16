@@ -81,13 +81,13 @@ const server = http.createServer((req,res) => {
     try {return json(res,200,{...JSON.parse(fs.readFileSync(path.join(root,'dados/testes.json'),'utf8')),dataOrigin:'local'});} catch {return json(res,200,{records:[],warnings:[]});}
   }
   let file;
-  if (url.pathname.startsWith('/preview/') && cloud.enabled()) {
-    if(!/^\/preview\/[a-f0-9]{64}\/sheet-\d+(?:-\d+)?\.(pdf|png)$/.test(url.pathname))return json(res,404,{});
-    const object=url.pathname.slice(1).replace(/^preview\//,'previews/');
-    cloud.download(object).then(({bytes,type})=>{res.writeHead(200,{'Content-Type':type||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'private, max-age=60'});res.end(bytes);}).catch(()=>json(res,404,{}));return;
-  } else if (url.pathname.startsWith('/preview/')) {
+  if (url.pathname.startsWith('/preview/')) {
     if(!/^\/preview\/[a-f0-9]{64}\/sheet-\d+(?:-\d+)?\.(pdf|png)$/.test(url.pathname))return json(res,404,{});
     file=path.join(root,'previews',...url.pathname.split('/').slice(2));
+    if(!fs.existsSync(file)&&cloud.enabled()){
+      const object=url.pathname.slice(1).replace(/^preview\//,'previews/');
+      cloud.download(object).then(({bytes,type})=>{res.writeHead(200,{'Content-Type':type||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'private, max-age=60'});res.end(bytes);}).catch(()=>json(res,404,{}));return;
+    }
   } else if (url.pathname === '/attachment') {
     if(cloud.enabled()) {
       try{
@@ -118,7 +118,7 @@ const server = http.createServer((req,res) => {
     if(!files[url.pathname]) return json(res,404,{});
     file=path.join(root,files[url.pathname]);
   }
-  const type={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.pdf':'application/pdf','.png':'image/png'}[path.extname(file)] || 'application/octet-stream';
+  const type={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.pdf':'application/pdf','.png':'image/png'}[path.extname(file).toLowerCase()] || 'application/octet-stream';
   fs.readFile(file,(err,buf)=>{if(err)return json(res,404,{});res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(buf);});
 });
 server.on('error',e=>{if(e.code==='EADDRINUSE')process.exit(0);console.error(e);process.exit(1);});
