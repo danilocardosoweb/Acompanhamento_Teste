@@ -1,0 +1,36 @@
+PAINEL LOCAL DE QUALIDADE
+
+Abra Iniciar.cmd para iniciar o painel no navegador.
+O Outlook classico deve estar configurado no seu usuario do Windows.
+A janela minimizada do painel deve permanecer aberta para servir os arquivos
+e atualizar os dados a cada 15 minutos. Feche-a para encerrar o painel.
+
+O botao Atualizar e-mails executa a coleta imediatamente.
+Somente assuntos iniciados por TESTE (palavra inteira) sao importados.
+Respostas RES: e RE: nao entram nesta versao.
+Os e-mails nao sao alterados, movidos nem marcados como lidos.
+O historico ja importado e preservado mesmo se o e-mail sair da pasta.
+Datas, resultados ou codigos ambiguos podem exigir revisao.
+As metricas de aprovacao usam o ultimo registro por ferramenta e sequencia.
+Quando falta a data do teste, a ordenacao usa a data de recebimento.
+
+Clique em Visualizar para consultar Excel e PDF dentro do painel.
+As abas visiveis do Excel aparecem separadas, com zoom e opcao Abrir PDF.
+A visualizacao usa as areas de impressao do arquivo; nao permite editar celulas.
+Requer Excel instalado para gerar a primeira visualizacao de uma planilha.
+O arquivo e aberto somente para leitura, sem macros e sem atualizar links externos.
+As visualizacoes ficam em previews/ e sao reutilizadas enquanto o arquivo for igual.
+Clique em Baixar original para abrir o arquivo original no Excel.
+Os dados ficam em dados/testes.json e os documentos em anexos/.
+Os registros, anexos e visualizacoes sao sincronizados com o projeto Supabase
+Ferramentas_em_testes. O painel local consulta os dados confirmados na nuvem.
+O arquivo .cloud-credentials.json e privado deste computador e nao deve ser enviado.
+Ainda nao ha publicacao na Vercel nem acesso da diretoria nesta etapa.
+
+ABA CORRECOES
+A aba Correcoes consulta os registros do sistema e mostra apenas ferramentas e
+sequencias que tambem existem no acompanhamento de testes. Os arquivos vinculados
+a correcoes ficam no bucket privado quality-files. PDF e video podem ser abertos
+no navegador; Excel fica disponivel para baixar. O limite por arquivo e 200 MB.
+O endereco 127.0.0.1:4317 funciona apenas neste computador.
+Requer Node.js instalado em C:\Program Files\nodejs\node.exe.

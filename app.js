@@ -1,0 +1,29 @@
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const date=s=>s?new Date(s.length===10?s+'T12:00:00':s).toLocaleDateString('pt-BR'):'Data não identificada';
+const stamp=s=>s?new Date(s).toLocaleString('pt-BR'):'';
+const sortDate=r=>(r.testDate||r.received.slice(0,10))+'T'+r.received.slice(11);
+let data={records:[]}, selected='', lastVersion='', wasSyncing=false;
+function groups(){const map=new Map();for(const r of data.records){const key=r.tool||'Código não identificado';if(!map.has(key))map.set(key,[]);map.get(key).push(r);}for(const rows of map.values())rows.sort((a,b)=>sortDate(b).localeCompare(sortDate(a))||b.received.localeCompare(a.received));return map;}
+function latest(rows){const map=new Map();for(const r of rows){if(!map.has(r.sequence))map.set(r.sequence,r);}return [...map.values()];}
+function badge(s){return `<span class="badge ${esc(s)}">${esc(s)}</span>`;}
+function render(){
+ const all=groups();const latestRows=[...all.values()].flatMap(latest);
+ $('m-tools').textContent=[...all.keys()].filter(x=>x!=='Código não identificado').length;
+ $('m-approved').textContent=latestRows.filter(r=>r.status==='APROVADO').length;
+ $('m-rejected').textContent=latestRows.filter(r=>r.status==='REPROVADO').length;
+ $('m-total').textContent=data.records.length;
+ $('m-review').textContent=`${latestRows.filter(r=>r.status==='REVISAR').length} sequência(s) a revisar`;
+ const q=$('search').value.trim().toUpperCase(), status=$('status').value;
+ const filtered=[...all].filter(([key,rows])=>key.includes(q)&&(!status||latest(rows).some(r=>r.status===status))).sort((a,b)=>a[0].localeCompare(b[0]));
+ if(!filtered.some(([key])=>key===selected))selected=filtered[0]?.[0]||'';
+ $('count').textContent=`${filtered.length} ferramenta(s)`;
+ $('tools').innerHTML=filtered.map(([key,rows])=>{const recent=latest(rows);const state=recent.some(r=>r.status==='REPROVADO')?'REPROVADO':recent.some(r=>r.status==='REVISAR')?'REVISAR':'APROVADO';return `<button class="tool ${key===selected?'active':''}" data-key="${esc(key)}"><strong>${esc(key)}</strong>${badge(state)}<small>${rows.length} teste(s) · ${recent.length} sequência(s)</small></button>`}).join('')||'<div class="empty">Nenhuma ferramenta encontrada.</div>';
+ document.querySelectorAll('.tool').forEach(b=>b.onclick=()=>{selected=b.dataset.key;render();});
+ if(!selected){$('detail').innerHTML='<div class="empty">Os resultados aparecerão aqui após a coleta do Outlook.</div>';return;}
+ const rows=all.get(selected), current=new Set(latest(rows).map(r=>r.id));
+ $('detail').innerHTML=`<div class="detail-top"><div><div class="eyebrow">FERRAMENTA</div><h2>${esc(selected)}</h2><p>${rows.length} teste(s) no histórico</p></div><small>Mais recente<br><strong>${date(rows[0].testDate||rows[0].received)}</strong></small></div><div class="history-label">HISTÓRICO DE TESTES</div>`+rows.map(r=>`<article class="test"><div class="test-head"><strong>SEQ. ${esc(r.sequence||'—')} · ${r.test?'Teste '+esc(r.test):'Teste sem número'}</strong>${badge(r.status)}<time>${date(r.testDate)}</time></div>${current.has(r.id)?'<p class="latest">Último registro desta sequência</p>':''}<p class="comment">${esc(r.comment||'Sem comentário.')}</p><div class="meta">${esc(r.sender)} · Recebido em ${stamp(r.received)}</div><div class="attachments">${r.attachments.map((a,i)=>`<div class="attachment-item"><span>${esc(a.name)}</span><div>${/\.(xlsx|xls|xlsm|xlsb|pdf)$/i.test(a.name)?`<button class="preview-button" data-id="${esc(r.id)}" data-index="${i}" data-name="${esc(a.name)}">Visualizar</button>`:""}<a href="/attachment?id=${encodeURIComponent(r.id)}&index=${i}">↓ Baixar original · ${Math.ceil(a.size/1024)} KB</a></div></div>`).join('')||'<span class="meta">Nenhum anexo disponível.</span>'}</div><details><summary>Ver e-mail completo</summary><p>${esc(r.subject)}</p><pre>${esc(r.body)}</pre></details></article>`).join('');
+ window.renderCorrections?.();
+}
+async function refresh(){try{const state=await(await fetch('/api/status')).json();$('sync').disabled=state.syncing;$('sync').textContent=state.syncing?'↻ Coletando e-mails…':'↻ Atualizar e-mails';const response=await fetch('/api/data');const next=await response.json();if(!response.ok)throw Error(next.warnings?.[0]||'Supabase indisponível.');if(next.updatedAt!==lastVersion||!lastVersion){data=next;lastVersion=next.updatedAt;render();}const source=data.dataOrigin==='supabase'?'Supabase · Ferramentas_em_testes':'arquivo local';$('sync-state').textContent=state.syncing?'Consultando o Outlook e sincronizando com o Supabase…':data.updatedAt?`Última coleta: ${stamp(data.updatedAt)} · Fonte atual: ${source} · Atualização automática a cada 15 minutos.`:'Nenhuma coleta concluída. Abra o Outlook e clique em Atualizar e-mails.';const warnings=[state.error,state.cloud?.error,...(data.warnings||[])].filter(Boolean);$('warning').hidden=!warnings.length;$('warning').textContent=warnings.join('\n');}catch(e){$('sync-state').textContent='Não foi possível consultar o Supabase: '+e.message;$('sync').disabled=false;}}
+$('search').oninput=render;$('status').onchange=render;$('sync').onclick=async()=>{try{await fetch('/api/sync',{method:'POST',headers:{'X-Painel':'local'}});await refresh();}catch{$('sync-state').textContent='Não foi possível iniciar a coleta.';}};refresh();setInterval(refresh,4000);
