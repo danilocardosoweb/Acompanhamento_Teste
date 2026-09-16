@@ -21,6 +21,14 @@ Deno.serve(async req=>{
   const allowed=await(await api(`/rest/v1/quality_collectors?token_hash=eq.${digest}&active=eq.true&select=label&limit=1`)).json();
   if(!allowed.length)return respond({error:'Unauthorized'},401);
   const url=new URL(req.url), action=url.searchParams.get('action');
+  if(action==='login'&&req.method==='POST') {
+   const body=await req.json();
+   const email=String(body.email||'').trim(),password=String(body.password||'');
+   if(!email||!password||email.length>254||password.length>200)return respond({error:'Usuário ou senha inválidos.'},401);
+   const users=await(await api('/rest/v1/rpc/quality_verify_existing_user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({p_email:email,p_password:password})})).json();
+   if(!users.length)return respond({error:'Usuário ou senha inválidos.'},401);
+   return respond({user:{id:users[0].user_id,email:users[0].email,name:users[0].name,role:users[0].role}});
+  }
   if(action==='file') {
    const object=url.searchParams.get('path')||'';
    if(!validPath(object))return respond({error:'Invalid path'},400);

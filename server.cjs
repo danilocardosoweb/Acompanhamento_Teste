@@ -8,6 +8,10 @@ const cloud = require('./cloud.cjs')(root);
 let syncing = false, error = '', lastRun = '';
 let previewQueue=Promise.resolve();
 const previewJobs=new Map();
+const sessions=new Map();
+function cookies(req){return Object.fromEntries(String(req.headers.cookie||'').split(';').map(v=>v.trim().split('=').map(decodeURIComponent)).filter(v=>v.length===2));}
+function authenticated(req){const token=cookies(req).quality_session,session=token&&sessions.get(token);if(!session||session.expires<Date.now()){if(token)sessions.delete(token);return null;}return session.user;}
+function readBody(req,limit=4096){return new Promise((resolve,reject)=>{let body='';req.on('data',d=>{body+=d;if(body.length>limit){reject(Error('Requisição muito grande.'));req.destroy();}});req.on('end',()=>resolve(body));req.on('error',reject);});}
 function attachment(url) {
   const data=JSON.parse(fs.readFileSync(path.join(root,'dados/testes.json'),'utf8'));
   const record=data.records.find(r=>r.id===url.searchParams.get('id'));
@@ -60,7 +64,9 @@ const server = http.createServer((req,res) => {
   const url = new URL(req.url, `http://127.0.0.1:${port}`);
   if (req.method === 'POST') {
     if(req.headers.origin !== `http://127.0.0.1:${port}` || req.headers['x-painel'] !== 'local') return json(res,403,{error:'Origem invalida.'});
-    if(url.pathname === '/api/sync') {sync(); return json(res,202,{syncing});}
+    if(url.pathname === '/api/login') {readBody(req).then(async body=>{try{const input=JSON.parse(body),user=await cloud.login(input.email,input.password),token=crypto.randomBytes(32).toString('hex');sessions.set(token,{user,expires:Date.now()+8*60*60*1000});res.setHeader('Set-Cookie',`quality_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800`);json(res,200,{user});}catch(e){json(res,401,{error:'Usuário ou senha inválidos.'});}}).catch(()=>json(res,400,{error:'Dados inválidos.'}));return;}
+    if(url.pathname === '/api/logout') {const token=cookies(req).quality_session;if(token)sessions.delete(token);res.setHeader('Set-Cookie','quality_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return json(res,200,{ok:true});}
+    if(url.pathname === '/api/sync') {if(!authenticated(req))return json(res,401,{error:'Faça login para atualizar os e-mails.'});sync();return json(res,202,{syncing});}
     if(url.pathname === '/api/preview') {
       try {preview(url).then(result=>json(res,200,result)).catch(e=>json(res,500,{error:e.message}));}catch(e){json(res,400,{error:e.message});}
       return;
@@ -68,6 +74,7 @@ const server = http.createServer((req,res) => {
     return json(res,404,{});
   }
   if(req.method !== 'GET') return json(res,405,{});
+  if(url.pathname === '/api/auth') return json(res,200,{user:authenticated(req)});
   if(url.pathname === '/api/status') return json(res,200,{syncing,error,lastRun,cloud:cloud.status()});
   if(url.pathname === '/api/data') {
     if(cloud.enabled()) {cloud.read().then(data=>json(res,200,data)).catch(e=>json(res,503,{records:[],warnings:[e.message]}));return;}
