@@ -45,7 +45,8 @@ Deno.serve(async req=>{
    if(!/^[0-9a-f-]{36}$/.test(userId)||!rows.length||rows.length>500)return respond({error:'Importação inválida.'},400);
    for(const row of rows){const id=String(row.matchId||''),text=String(row.correction||'').trim(),systemTool=String(row.systemTool||'').toUpperCase();if(!/^[0-9a-f-]{36}$/.test(id)||!text||text.length>10000||!/^[A-Z0-9._-]+-\d{1,3}$/.test(systemTool))return respond({error:'Registro de importação inválido.'},400);
     if(row.status==='new')await upsert('analysis_correcoes',{id,__file_name:'importacao-web.xlsx',__uploaded_at:new Date().toISOString(),ferramenta_code:systemTool,payload:row.payload||{}});
-    await api('/rest/v1/quality_correction_actions?on_conflict=correction_id',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'},body:JSON.stringify({correction_id:id,correction_text:text,corrected_at:new Date().toISOString(),corrected_by:userId,corrected_by_name:userName,updated_at:new Date().toISOString()})});
+    const rawDate=String(row.correctionDate||'').trim(),br=rawDate.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/),parsedDate=br?new Date(Date.UTC(Number(br[3]),Number(br[2])-1,Number(br[1]),12)):new Date(rawDate),correctedAt=Number.isNaN(parsedDate.getTime())?new Date().toISOString():parsedDate.toISOString();
+    await api('/rest/v1/quality_correction_actions?on_conflict=correction_id',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'},body:JSON.stringify({correction_id:id,correction_text:text,corrected_at:correctedAt,corrected_by:userId,corrected_by_name:userName,updated_at:new Date().toISOString()})});
    }
    return respond({ok:true,imported:rows.length});
   }

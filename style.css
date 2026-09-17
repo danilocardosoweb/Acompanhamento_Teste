@@ -81,3 +81,5 @@ body.sidebar-collapsed .aside-bottom .dot{width:8px;height:8px;box-shadow:0 0 0 
 .import-result-note{align-self:center;margin:0 0 0 4px;font-size:11px;color:#65788a}.import-finish{background:#16887f;color:#fff;min-width:120px}.import-finish:hover{background:#11776f}
 
 .import-result-title{display:flex;align-items:center;justify-content:space-between;padding:11px 13px;background:#eff8f5;border-bottom:1px solid #d5e9e3;color:#285549;font-size:11px}.import-result-title span{color:#16887f;font-weight:700}.import-row.imported{background:#fbfefd;border-left:3px solid #2aa88e}.import-row.imported b{color:#16846f}
+
+.import-correction-date{display:block;margin-bottom:5px;color:#5f7587;font-size:9px;font-weight:700}
