@@ -4,6 +4,20 @@ const date=s=>s?new Date(s.length===10?s+'T12:00:00':s).toLocaleDateString('pt-B
 const stamp=s=>s?new Date(s).toLocaleString('pt-BR'):'';
 const sortDate=r=>(r.testDate||r.received.slice(0,10))+'T'+r.received.slice(11);
 let data={records:[]}, selected='', lastVersion='', wasSyncing=false, authUser=null;
+
+function setSidebar(collapsed){
+  document.body.classList.toggle('sidebar-collapsed',collapsed);
+  const button=$('sidebar-toggle');
+  button.textContent=collapsed?'›':'‹';
+  button.setAttribute('aria-expanded',String(!collapsed));
+  button.setAttribute('aria-label',collapsed?'Expandir menu':'Recolher menu');
+  document.querySelectorAll('.nav-button').forEach(item=>item.title=collapsed?item.querySelector('.nav-label').textContent:'');
+  try{localStorage.setItem('quality-sidebar',collapsed?'collapsed':'expanded')}catch{}
+}
+let savedSidebar=false;
+try{savedSidebar=localStorage.getItem('quality-sidebar')==='collapsed'}catch{}
+setSidebar(savedSidebar);
+$('sidebar-toggle').onclick=()=>setSidebar(!document.body.classList.contains('sidebar-collapsed'));
 function renderAuth(){const signed=!!authUser;$('auth-user').hidden=!signed;$('logout').hidden=!signed;$('import-corrections').hidden=!signed;$('auth-user').textContent=signed?authUser.name||authUser.email:'';$('sync').textContent=signed?'↻ Atualizar e-mails':'🔒 Atualizar e-mails';}
 function groups(){const map=new Map();for(const r of data.records){const key=r.tool||'Código não identificado';if(!map.has(key))map.set(key,[]);map.get(key).push(r);}for(const rows of map.values())rows.sort((a,b)=>sortDate(b).localeCompare(sortDate(a))||b.received.localeCompare(a.received));return map;}
 function latest(rows){const map=new Map();for(const r of rows){if(!map.has(r.sequence))map.set(r.sequence,r);}return [...map.values()];}
