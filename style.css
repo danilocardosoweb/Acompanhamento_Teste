@@ -52,3 +52,27 @@ body.sidebar-collapsed .nav-button{justify-content:center;padding:14px 8px}
 body.sidebar-collapsed .aside-bottom{left:0;right:0;text-align:center}
 body.sidebar-collapsed .sidebar-toggle{right:-13px}
 @media(max-width:760px){.sidebar-toggle{display:none}}
+
+/* Refined sidebar rail */
+.sidebar-toggle{top:28px;right:16px;width:32px;height:32px;border:1px solid rgba(172,210,218,.22);border-radius:8px;background:rgba(255,255,255,.055);color:#cfe3e8;box-shadow:none;display:grid;place-items:center}
+.sidebar-toggle:hover{background:rgba(66,199,179,.16);border-color:rgba(66,199,179,.48);color:#62d4c2}
+.sidebar-toggle svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform .22s ease}
+.sidebar-toggle.is-collapsed svg{transform:rotate(180deg)}
+.nav-button{min-height:48px;border-radius:7px;border-left:0;padding:12px 13px;gap:12px;transition:background .18s ease,color .18s ease}
+.nav-button:hover{background:rgba(255,255,255,.055);color:#fff}
+.nav-button.active{position:relative;border-left:0;border-radius:7px;background:rgba(66,199,179,.13);color:#fff}
+.nav-button.active:before{content:'';position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:#42c7b3}
+.nav-icon{width:20px;height:20px;min-width:20px;color:#a9c0ce}
+.nav-icon svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.nav-button.active .nav-icon{color:#55d1bd}
+body.sidebar-collapsed aside{width:72px;padding:25px 10px}
+body.sidebar-collapsed main{margin-left:72px}
+body.sidebar-collapsed .brand{transform:scale(.72);transform-origin:center top}
+body.sidebar-collapsed .brand-divider{margin-top:13px}
+body.sidebar-collapsed .sidebar-toggle{top:88px;right:20px}
+body.sidebar-collapsed aside nav{margin:65px 0 0}
+body.sidebar-collapsed .nav-button{width:44px;min-height:44px;margin:7px auto;padding:12px;justify-content:center;border-radius:10px}
+body.sidebar-collapsed .nav-button.active:before{left:-10px;top:9px;bottom:9px}
+body.sidebar-collapsed .aside-bottom{bottom:25px}
+body.sidebar-collapsed .aside-bottom .dot{width:8px;height:8px;box-shadow:0 0 0 4px rgba(65,197,176,.1)}
+@media(max-width:760px){.sidebar-toggle{display:none}}

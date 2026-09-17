@@ -8,7 +8,7 @@ let data={records:[]}, selected='', lastVersion='', wasSyncing=false, authUser=n
 function setSidebar(collapsed){
   document.body.classList.toggle('sidebar-collapsed',collapsed);
   const button=$('sidebar-toggle');
-  button.textContent=collapsed?'›':'‹';
+  button.classList.toggle('is-collapsed',collapsed);
   button.setAttribute('aria-expanded',String(!collapsed));
   button.setAttribute('aria-label',collapsed?'Expandir menu':'Recolher menu');
   document.querySelectorAll('.nav-button').forEach(item=>item.title=collapsed?item.querySelector('.nav-label').textContent:'');
