@@ -127,7 +127,7 @@ const server = http.createServer((req,res) => {
       cloud.download(a.objectPath).then(({bytes,type})=>{res.writeHead(200,{'Content-Type':type||a.mimeType||'application/octet-stream','Content-Disposition':`${inline?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(a.name)}`,'X-Content-Type-Options':'nosniff','Cache-Control':'private, no-store'});res.end(bytes);}).catch(()=>json(res,404,{}));return;
     }catch{return json(res,404,{});}
   } else {
-    const files={'/':'index.html','/app.js':'app.js','/corrections.js':'corrections.js','/indicators.js':'indicators.js','/preview.js':'preview.js','/style.css':'style.css'};
+    const files={'/':'index.html','/app.js':'app.js','/knowledge.js':'knowledge.js','/corrections.js':'corrections.js','/indicators.js':'indicators.js','/preview.js':'preview.js','/style.css':'style.css'};
     if(!files[url.pathname]) return json(res,404,{});
     file=path.join(root,files[url.pathname]);
   }
