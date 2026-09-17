@@ -2,7 +2,6 @@
   "name": "acompanhamento_teste",
   "version": "1.0.0",
   "description": "Painel local para acompanhar testes e correções de ferramentas da Tecnoperfil.",
-  "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -21,5 +20,6 @@
   "dependencies": {
     "pdfjs-dist": "5.4.624",
     "read-excel-file": "9.3.10"
-  }
+  },
+  "private": true
 }
