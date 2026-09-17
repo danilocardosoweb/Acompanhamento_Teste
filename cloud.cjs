@@ -10,11 +10,11 @@ module.exports=function(root){
  let state={enabled:fs.existsSync(credentialPath),syncing:false,error:'',lastSync:null};
  try{state={...state,...JSON.parse(fs.readFileSync(statusPath,'utf8')),syncing:false};}catch{}
  const saveState=()=>{fs.mkdirSync(path.dirname(statusPath),{recursive:true});fs.writeFileSync(statusPath,JSON.stringify(state));};
- function config(){const c=JSON.parse(fs.readFileSync(credentialPath,'utf8'));if(c.endpoint!=='https://sldhpwtdipndnljbzojm.supabase.co/functions/v1/quality-collector')throw Error('Projeto Supabase inesperado.');return c;}
+ function config(){const c=JSON.parse(fs.readFileSync(credentialPath,'utf8'));if(c.endpoint!=='https://sldhpwtdipndnljbzojm.supabase.co/functions/v1/quality-collector')throw Error('Configuração do serviço de dados inválida.');return c;}
  async function request(action,{method='GET',body,type='application/json',object}={}){
   const c=config(),url=new URL(c.endpoint);url.searchParams.set('action',action);if(object)url.searchParams.set('path',object);
   const res=await fetch(url,{method,headers:{'x-collector-token':c.token,'Content-Type':type},body,signal:AbortSignal.timeout(60000)});
-  if(!res.ok){let message=await res.text();throw Error(`Supabase (${res.status}): ${message.slice(0,400)}`);}return res;
+  if(!res.ok){let message=await res.text();throw Error(`Serviço de dados (${res.status}): ${message.slice(0,400)}`);}return res;
  }
  const digest=b=>crypto.createHash('sha256').update(b).digest('hex');
  async function perform(){
@@ -52,7 +52,7 @@ module.exports=function(root){
  function sync(){if(!running){running=perform().finally(()=>{running=null;});}return running;}
  function cached(){return JSON.parse(fs.readFileSync(cachePath,'utf8'));}
  async function read(){
-  if(!state.enabled)throw Error('Supabase não configurado.');
+  if(!state.enabled)throw Error('Serviço de dados não configurado.');
   if(Date.now()-lastRead<60000&&fs.existsSync(cachePath))return {...cached(),dataOrigin:'supabase'};
   if(!readPromise)readPromise=(async()=>{try{const data=await(await request('data')).json();if(!data.updatedAt)throw Error('Primeira sincronização pendente.');fs.writeFileSync(cachePath,JSON.stringify(data));lastRead=Date.now();return {...data,dataOrigin:'supabase'};}finally{readPromise=null;}})();
   return readPromise;
