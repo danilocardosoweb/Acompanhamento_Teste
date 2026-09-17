@@ -1,0 +1,24 @@
+{
+  "name": "acompanhamento_teste",
+  "version": "1.0.0",
+  "description": "Painel local para acompanhar testes e correções de ferramentas da Tecnoperfil.",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danilocardosoweb/Acompanhamento_Teste.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/danilocardosoweb/Acompanhamento_Teste/issues"
+  },
+  "homepage": "https://github.com/danilocardosoweb/Acompanhamento_Teste#readme",
+  "dependencies": {
+    "read-excel-file": "9.3.10"
+  }
+}

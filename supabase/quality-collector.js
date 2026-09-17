@@ -40,6 +40,15 @@ Deno.serve(async req=>{
    }
    return respond({ok:true});
   }
+  if(action==='import-corrections'&&req.method==='POST') {
+   const body=await req.json(),rows=Array.isArray(body.rows)?body.rows:[],userId=String(body.userId||''),userName=String(body.userName||'').slice(0,200);
+   if(!/^[0-9a-f-]{36}$/.test(userId)||!rows.length||rows.length>500)return respond({error:'Importação inválida.'},400);
+   for(const row of rows){const id=String(row.matchId||''),text=String(row.correction||'').trim(),systemTool=String(row.systemTool||'').toUpperCase();if(!/^[0-9a-f-]{36}$/.test(id)||!text||text.length>10000||!/^[A-Z0-9._-]+-\d{1,3}$/.test(systemTool))return respond({error:'Registro de importação inválido.'},400);
+    if(row.status==='new')await upsert('analysis_correcoes',{id,__file_name:'importacao-web.xlsx',__uploaded_at:new Date().toISOString(),ferramenta_code:systemTool,payload:row.payload||{}});
+    await api('/rest/v1/quality_correction_actions?on_conflict=correction_id',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'},body:JSON.stringify({correction_id:id,correction_text:text,corrected_at:new Date().toISOString(),corrected_by:userId,corrected_by_name:userName,updated_at:new Date().toISOString()})});
+   }
+   return respond({ok:true,imported:rows.length});
+  }
   if(action==='file') {
    const object=url.searchParams.get('path')||'';
    if(!validPath(object))return respond({error:'Invalid path'},400);

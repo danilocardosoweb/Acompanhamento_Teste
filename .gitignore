@@ -3,3 +3,5 @@ dados/
 anexos/
 previews/
 *.log
+
+node_modules/

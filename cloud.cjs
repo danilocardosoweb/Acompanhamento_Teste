@@ -64,7 +64,8 @@ module.exports=function(root){
   if(file){const ext=path.extname(file.name).toLowerCase(),safe=`${Date.now()}-${crypto.randomBytes(5).toString('hex')}${ext}`,object=`corrections/${id}/${safe}`;await request('file',{method:'PUT',body:file.bytes,type:file.mimeType,object});meta={name:file.name,objectPath:object,size:file.bytes.length,mimeType:file.mimeType};}
   await request('correction',{method:'POST',body:JSON.stringify({id,text,userId:user.id,userName:user.name||user.email,file:meta})});lastRead=0;
  }
+ async function importCorrections(rows,user){await request('import-corrections',{method:'POST',body:JSON.stringify({rows,userId:user.id,userName:user.name||user.email})});lastRead=0;}
  function findFile(id,index){const r=cached().records.find(r=>r.id===id);return r?.attachments[index];}
  function findCorrectionFile(id,index){const cache=cached(),c=(cache.productionNotes||cache.corrections||[]).find(c=>c.id===id);return c?.files[index];}
- return {sync,read,download,login,saveCorrection,findFile,findCorrectionFile,status:()=>({...state}),enabled:()=>fs.existsSync(credentialPath)};
+ return {sync,read,download,login,saveCorrection,importCorrections,findFile,findCorrectionFile,status:()=>({...state}),enabled:()=>fs.existsSync(credentialPath)};
 };

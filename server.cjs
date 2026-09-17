@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const {spawn} = require('child_process');
 const crypto = require('crypto');
+const {parseCorrections}=require('./importer.cjs');
 const root = __dirname, port = 4317;
 const cloud = require('./cloud.cjs')(root);
 let syncing = false, error = '', lastRun = '';
@@ -79,6 +80,7 @@ const server = http.createServer((req,res) => {
     if(url.pathname === '/api/login') {readBody(req).then(async body=>{try{const input=JSON.parse(body),user=await cloud.login(input.email,input.password),token=crypto.randomBytes(32).toString('hex');sessions.set(token,{user,expires:Date.now()+8*60*60*1000});res.setHeader('Set-Cookie',`quality_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800`);json(res,200,{user});}catch(e){json(res,401,{error:'Usuário ou senha inválidos.'});}}).catch(()=>json(res,400,{error:'Dados inválidos.'}));return;}
     if(url.pathname === '/api/logout') {const token=cookies(req).quality_session;if(token)sessions.delete(token);res.setHeader('Set-Cookie','quality_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return json(res,200,{ok:true});}
     if(url.pathname === '/api/correction') {const user=authenticated(req);if(!user)return json(res,401,{error:'Faça login para registrar a correção.'});readBody(req,36*1024*1024).then(async body=>{try{const input=JSON.parse(body);if(!/^[0-9a-f-]{36}$/.test(String(input.id||''))||String(input.text||'').length>10000)throw Error('Dados inválidos.');await cloud.saveCorrection({id:input.id,text:String(input.text||''),user,file:correctionFile(input.file)});json(res,200,{ok:true});}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
+    if(url.pathname === '/api/import-corrections') {const user=authenticated(req);if(!user)return json(res,401,{error:'Faça login para importar correções.'});readBody(req,16*1024*1024).then(async body=>{try{const input=JSON.parse(body),bytes=Buffer.from(String(input.data||''),'base64');if(!bytes.length||bytes.length>10*1024*1024||bytes[0]!==80||bytes[1]!==75)throw Error('Selecione um arquivo Excel .xlsx de até 10 MB.');const result=await parseCorrections(bytes,await cloud.read());if(input.confirm){const actionable=result.rows.filter(row=>row.status==='matched'||row.status==='new');await cloud.importCorrections(actionable,user);result.imported=actionable.length;}json(res,200,result);}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
     if(url.pathname === '/api/sync') {if(!authenticated(req))return json(res,401,{error:'Faça login para atualizar os e-mails.'});sync();return json(res,202,{syncing});}
     if(url.pathname === '/api/preview') {
       try {(url.searchParams.get('kind')==='correction'?correctionPreview(url):preview(url)).then(result=>json(res,200,result)).catch(e=>json(res,500,{error:e.message}));}catch(e){json(res,400,{error:e.message});}
