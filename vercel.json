@@ -1,11 +1,19 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/index.cjs" },
-    { "source": "/attachment", "destination": "/api/index.cjs" },
-    { "source": "/correction-file", "destination": "/api/index.cjs" },
-    { "source": "/tool-drawing", "destination": "/api/index.cjs" },
-    { "source": "/preview/:path*", "destination": "/api/index.cjs" }
+  "builds": [
+    { "src": "api/index.cjs", "use": "@vercel/node" },
+    { "src": "index.html", "use": "@vercel/static" },
+    { "src": "*.js", "use": "@vercel/static" },
+    { "src": "*.css", "use": "@vercel/static" },
+    { "src": "vendor/**", "use": "@vercel/static" }
   ],
-  "functions": { "api/index.cjs": { "maxDuration": 60 } }
+  "routes": [
+    { "src": "/api/.*", "dest": "/api/index.cjs" },
+    { "src": "/attachment", "dest": "/api/index.cjs" },
+    { "src": "/correction-file", "dest": "/api/index.cjs" },
+    { "src": "/tool-drawing", "dest": "/api/index.cjs" },
+    { "src": "/preview/.*", "dest": "/api/index.cjs" },
+    { "handle": "filesystem" },
+    { "src": "/.*", "dest": "/index.html" }
+  ]
 }
