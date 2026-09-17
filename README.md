@@ -46,3 +46,12 @@ O repositório não contém e-mails, anexos, visualizações geradas nem credenc
 ## Situação atual
 
 O painel está em execução local. A publicação na Vercel e o login para a diretoria serão adicionados em uma etapa posterior.
+# Vercel
+
+A versão hospedada usa estas variáveis de ambiente em **Settings > Environment Variables**:
+
+- `QUALITY_COLLECTOR_ENDPOINT`: endereço completo da função `quality-collector`.
+- `QUALITY_COLLECTOR_TOKEN`: token de 64 caracteres usado pelo computador coletor.
+- `QUALITY_SESSION_SECRET`: chave aleatória com pelo menos 32 caracteres para assinar as sessões de login.
+
+Cadastre as três em Production, Preview e Development e faça um novo deploy. Não use prefixos públicos como `NEXT_PUBLIC_`, pois os valores devem permanecer somente no servidor.
