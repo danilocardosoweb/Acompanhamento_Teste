@@ -77,3 +77,5 @@ body.sidebar-collapsed .nav-button.active:before{left:-10px;top:9px;bottom:9px}
 body.sidebar-collapsed .aside-bottom{bottom:25px}
 body.sidebar-collapsed .aside-bottom .dot{width:8px;height:8px;box-shadow:0 0 0 4px rgba(65,197,176,.1)}
 @media(max-width:760px){.sidebar-toggle{display:none}}
+
+.import-result-note{align-self:center;margin:0 0 0 4px;font-size:11px;color:#65788a}.import-finish{background:#16887f;color:#fff;min-width:120px}.import-finish:hover{background:#11776f}
