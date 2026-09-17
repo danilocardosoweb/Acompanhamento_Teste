@@ -20,8 +20,9 @@ window.CorrectionKnowledge=(()=>{
   ['tratamento-nitretar','Tratamento','Enviar para nitretação','Encaminhamento da ferramenta para nitretação','Recuperar a condição superficial','Médio'],
   ['manutencao-limpar','Manutenção','Limpar e inspecionar','Limpeza e inspeção técnica da região afetada','Remover interferências e confirmar a causa','Baixo'],
   ['outro','Outro','Outra correção','Correção personalizada','Efeito definido pelo responsável','Variável']
- ].map(([id,family,name,phrase,effect,risk])=>({id,family,name,phrase,effect,risk}));
+ ].map(([id,family,name,phrase,effect,risk])=>({id,family,name,label:`${family} · ${name}`,phrase,effect,risk}));
  const byId=id=>actions.find(action=>action.id===id);
+ const byLabel=label=>actions.find(action=>action.label.toLocaleLowerCase('pt-BR')===String(label||'').trim().toLocaleLowerCase('pt-BR'));
  function suggest(problem){const text=String(problem||'').toLocaleUpperCase('pt-BR'),ids=[];const add=(...values)=>values.forEach(v=>!ids.includes(v)&&ids.push(v));
   if(/ADIANT|CORRIDA/.test(text))add('bearing-choke','bearing-aumentar','pocket-balancear','apoio-ajustar');
   if(/ATRAS/.test(text))add('bearing-reduzir','bearing-relief','pocket-abrir','porthole-abrir');
@@ -31,5 +32,5 @@ window.CorrectionKnowledge=(()=>{
   if(/PAREDE|MANDRIL|TUBULAR/.test(text))add('mandril-centralizar','porthole-balancear','apoio-ajustar');
   if(!ids.length)add('manutencao-limpar','bearing-polir','bearing-equalizar','outro');return ids.slice(0,4).map(byId);
  }
- return {actions,byId,suggest};
+ return {actions,byId,byLabel,suggest};
 })();
