@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/danilocardosoweb/Acompanhamento_Teste#readme",
   "dependencies": {
+    "pdfjs-dist": "5.4.624",
     "read-excel-file": "9.3.10"
   }
 }

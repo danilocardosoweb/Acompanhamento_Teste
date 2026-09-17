@@ -4,6 +4,7 @@
     { "source": "/api/:path*", "destination": "/api/index.cjs" },
     { "source": "/attachment", "destination": "/api/index.cjs" },
     { "source": "/correction-file", "destination": "/api/index.cjs" },
+    { "source": "/tool-drawing", "destination": "/api/index.cjs" },
     { "source": "/preview/:path*", "destination": "/api/index.cjs" }
   ],
   "functions": { "api/index.cjs": { "maxDuration": 60 } }
