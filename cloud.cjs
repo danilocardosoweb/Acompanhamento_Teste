@@ -55,7 +55,11 @@ module.exports=function(root){
      }
     }
    }}
-   const result=await(await request('sync',{method:'POST',body:JSON.stringify(data)})).json();
+   // O corpo completo dos e-mails FEP pode se repetir centenas de vezes no
+   // histórico. A interface usa os campos estruturados e o comentário; manter
+   // esse corpo fora do payload evita ultrapassar o limite da Edge Function.
+   const syncData={...data,fepRecords:(data.fepRecords||[]).map(({body,...record})=>record)};
+   const result=await(await request('sync',{method:'POST',body:JSON.stringify(syncData)})).json();
    // Read back the stored database records; never mark an upload as confirmed from local data alone.
    const confirmed=await(await request('data')).json();
    if(confirmed.records.length<data.records.length)throw Error('A conferência dos registros enviados falhou.');
