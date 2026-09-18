@@ -43,12 +43,13 @@ function renderSettings(){
 }
 function openPage(page){
  document.querySelectorAll('.nav-button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
- ['tracking','corrections','indicators','settings'].forEach(name=>$(name+'-page').hidden=name!==page);
+ ['tracking','corrections','fep','indicators','settings'].forEach(name=>$(name+'-page').hidden=name!==page);
  if(page==='corrections'||page==='indicators'){
   const target=page==='corrections'?'corrections-list':'indicator-kpis';
   $(target).innerHTML='<div class="empty">Carregando dados de produção…</div>';
   loadProductionData().then(()=>page==='corrections'?window.renderCorrections?.():window.renderIndicators?.()).catch(error=>$(target).innerHTML=`<div class="empty">${esc(error.message)}</div>`);
  }
+ if(page==='fep')window.renderFep?.();
  if(page==='settings')renderSettings();
 }
 window.openPage=openPage;
@@ -58,6 +59,7 @@ function groups(){const map=new Map();for(const r of data.records){const key=r.t
 function latest(rows){const map=new Map();for(const r of rows){if(!map.has(r.sequence))map.set(r.sequence,r);}return [...map.values()];}
 function badge(s){return `<span class="badge ${esc(s)}">${esc(s)}</span>`;}
 function render(){
+ window.__qualityData=data;
  const all=groups();const latestRows=[...all.values()].flatMap(latest);
  $('m-tools').textContent=[...all.keys()].filter(x=>x!=='Código não identificado').length;
  $('m-approved').textContent=latestRows.filter(r=>r.status==='APROVADO').length;
@@ -74,6 +76,7 @@ function render(){
  const rows=all.get(selected), current=new Set(latest(rows).map(r=>r.id));
  const sequences=latest(rows);
  $('detail').innerHTML=`<div class="detail-top"><div><div class="eyebrow">FERRAMENTA</div><h2>${esc(selected)}</h2><p>${rows.length} teste(s) · ${sequences.length} sequência(s)</p></div><small>Mais recente<br><strong>${date(rows[0].testDate||rows[0].received)}</strong></small></div><div class="sequence-summary">${sequences.map(r=>`<span><b>SEQ. ${esc(r.sequence||'—')}</b>${badge(r.status)}</span>`).join('')}</div><div class="history-label">HISTÓRICO DE TESTES</div>`+rows.map(r=>`<details class="test" ${current.has(r.id)?'open':''}><summary class="test-head"><span><strong>SEQ. ${esc(r.sequence||'—')}</strong><small>${r.test?'Teste '+esc(r.test):'Teste sem número'}</small></span>${badge(r.status)}<time>${date(r.testDate)}</time></summary><div class="test-body">${current.has(r.id)?'<p class="latest">Último registro desta sequência</p>':''}<p class="comment">${esc(r.comment||'Sem comentário.')}</p><div class="meta">${esc(r.sender)}${r.sender?' · ':''}Recebido em ${stamp(r.received)}</div><div class="attachments">${r.attachments.map((a,i)=>`<div class="attachment-item"><span>${esc(a.name)}</span><div>${/\.(xlsx|xls|xlsm|xlsb|pdf)$/i.test(a.name)?`<button class="preview-button" data-id="${esc(r.id)}" data-index="${i}" data-name="${esc(a.name)}">Visualizar</button>`:""}<a href="/attachment?id=${encodeURIComponent(r.id)}&index=${i}">↓ Baixar original · ${Math.ceil(a.size/1024)} KB</a></div></div>`).join('')||'<span class="meta">Nenhum anexo disponível.</span>'}</div><details class="email-detail"><summary>Ver e-mail completo</summary><p>${esc(r.subject)}</p><pre>${esc(r.body)}</pre></details></div></details>`).join('');
+ if(!$('fep-page')?.hidden)window.renderFep?.();
 
 }
 async function refresh(){try{const state=await(await fetch('/api/status')).json();canSync=state.canSync!==false;if(!authUser)$('sync').disabled=state.syncing;renderAuth();const response=await fetch('/api/data');const next=await response.json();if(!response.ok)throw Error(next.warnings?.[0]||'Serviço de dados indisponível.');if(next.updatedAt!==lastVersion||!lastVersion){data=productionLoaded?{...next,productionNotes:data.productionNotes,corrections:data.corrections,toolDrawings:data.toolDrawings}:next;lastVersion=next.updatedAt;render();}$('sync-state').textContent=state.syncing?'Consultando o Outlook e atualizando os dados…':data.updatedAt?`Última atualização: ${stamp(data.updatedAt)} · Atualização automática a cada 1 hora enquanto o painel estiver aberto.`:'Nenhuma coleta concluída. Abra Configurações e atualize os e-mails.';const warnings=[state.error,state.cloud?.error,...(data.warnings||[])].filter(Boolean);$('warning').hidden=!warnings.length;$('warning').textContent=warnings.join('\n');}catch(e){$('sync-state').textContent='Não foi possível consultar os dados: '+e.message;$('sync').disabled=false;}}

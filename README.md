@@ -5,8 +5,11 @@ Painel local para acompanhar testes e correções de ferramentas da Tecnoperfil.
 ## Recursos
 
 - Coleta e-mails do Outlook clássico na pasta `Testes Qualidade`.
+- Coleta também a pasta `Chamada FEP` ou `FEP`, identificando chegada, disponibilidade para coleta, coleta programada e retorno de ferramentas.
 - Importa assuntos iniciados por `TESTE` sem alterar as mensagens.
 - Organiza resultados por ferramenta e sequência.
+- Mantém uma aba própria de logística FEP com filtros, confiança da identificação e evidência do e-mail.
+- Importa tabelas de Follow Up da FEP, relacionando ferramenta, cliente, descrição e data prevista.
 - Exibe comentários, histórico e anexos Excel/PDF.
 - Gera visualização das abas de planilhas com o Excel instalado.
 - Sincroniza registros, anexos e visualizações com um bucket privado no Supabase.

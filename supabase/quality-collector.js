@@ -125,7 +125,7 @@ Deno.serve(async req=>{
   if(action==='sync'&&req.method==='POST') {
    const text=await req.text();if(text.length>5000000)return respond({error:'Payload too large'},413);
    const data=JSON.parse(text);
-   if(!Array.isArray(data.records)||data.records.length>3000)return respond({error:'Invalid records'},400);
+   if(!Array.isArray(data.records)||data.records.length>3000||(data.fepRecords!==undefined&&(!Array.isArray(data.fepRecords)||data.fepRecords.length>10000)))return respond({error:'Invalid records'},400);
    const rows=[],files=[];
    for(const r of data.records) {
     if(!/^[a-f0-9]{64}$/.test(r.id)||!['APROVADO','REPROVADO','REVISAR'].includes(r.status)||!Array.isArray(r.attachments))return respond({error:'Invalid record'},400);
@@ -135,12 +135,12 @@ Deno.serve(async req=>{
      files.push({id:`${r.id}-${i}`,test_id:r.id,name:a.name,object_path:a.cloudPath,size_bytes:a.size,sha256:a.sha256,preview_manifest:a.preview||null,synced_at:new Date().toISOString()});
     }
    }
-   const previousRows=await(await api('/rest/v1/quality_tests?select=id,result')).json(),previousById=new Map(previousRows.map(row=>[row.id,row.result]));
-   if(rows.length)await upsert('quality_tests',rows);
-   for(const row of rows){const previous=previousById.get(row.id);if(previous===undefined){await enqueueWhatsapp({type:'novo_teste',key:`test:new:${row.id}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number,reason:row.comment},at:row.received_at});}if((previous===undefined||previous!==row.result)&&row.result==='APROVADO')await enqueueWhatsapp({type:'ferramenta_aprovada',key:`test:approved:${row.id}:${row.result}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number},at:row.received_at});if((previous===undefined||previous!==row.result)&&row.result==='REPROVADO')await enqueueWhatsapp({type:'ferramenta_reprovada',key:`test:rejected:${row.id}:${row.result}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number,reason:row.comment},at:row.received_at});}
+   const uniqueRows=[...new Map(rows.map(row=>[row.id,row])).values()],previousRows=await(await api('/rest/v1/quality_tests?select=id,result')).json(),previousById=new Map(previousRows.map(row=>[row.id,row.result]));
+   if(uniqueRows.length)await upsert('quality_tests',uniqueRows);
+   for(const row of uniqueRows){const previous=previousById.get(row.id);if(previous===undefined){await enqueueWhatsapp({type:'novo_teste',key:`test:new:${row.id}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number,reason:row.comment},at:row.received_at});}if((previous===undefined||previous!==row.result)&&row.result==='APROVADO')await enqueueWhatsapp({type:'ferramenta_aprovada',key:`test:approved:${row.id}:${row.result}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number},at:row.received_at});if((previous===undefined||previous!==row.result)&&row.result==='REPROVADO')await enqueueWhatsapp({type:'ferramenta_reprovada',key:`test:rejected:${row.id}:${row.result}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number,reason:row.comment},at:row.received_at});}
    if(files.length)await upsert('quality_attachments',files);
-   await upsert('quality_sync_state',{id:'outlook-pcp',data:{updatedAt:data.updatedAt,source:data.source,warnings:data.warnings||[],skipped:data.skipped},synced_at:new Date().toISOString()});
-   return respond({ok:true,records:rows.length,attachments:files.length});
+   await upsert('quality_sync_state',{id:'outlook-pcp',data:{updatedAt:data.updatedAt,source:data.source,fepSource:data.fepSource||'',warnings:data.warnings||[],skipped:data.skipped,fepRecords:data.fepRecords||[]},synced_at:new Date().toISOString()});
+   return respond({ok:true,records:rows.length,fepRecords:(data.fepRecords||[]).length,attachments:files.length});
   }
   if(action==='data'&&req.method==='GET') {
    const records=[];

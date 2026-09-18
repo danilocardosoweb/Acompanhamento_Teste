@@ -145,7 +145,7 @@ const server = http.createServer((req,res) => {
       cloud.download(a.objectPath).then(({bytes,type})=>{res.writeHead(200,{'Content-Type':type||a.mimeType||'application/octet-stream','Content-Disposition':`${inline?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(a.name)}`,'X-Content-Type-Options':'nosniff','Cache-Control':'private, no-store'});res.end(bytes);}).catch(()=>json(res,404,{}));return;
     }catch{return json(res,404,{});}
   } else {
-    const files={'/':'index.html','/app.js':'app.js','/knowledge.js':'knowledge.js','/corrections.js':'corrections.js','/drawing.js':'drawing.js','/indicators.js':'indicators.js','/preview.js':'preview.js','/whatsapp-settings.js':'whatsapp-settings.js','/style.css':'style.css','/vendor/pdf.mjs':'vendor/pdf.mjs','/vendor/pdf.worker.mjs':'vendor/pdf.worker.mjs'};
+    const files={'/':'index.html','/app.js':'app.js','/knowledge.js':'knowledge.js','/corrections.js':'corrections.js','/drawing.js':'drawing.js','/indicators.js':'indicators.js','/fep.js':'fep.js','/preview.js':'preview.js','/whatsapp-settings.js':'whatsapp-settings.js','/style.css':'style.css','/vendor/pdf.mjs':'vendor/pdf.mjs','/vendor/pdf.worker.mjs':'vendor/pdf.worker.mjs'};
     if(!files[url.pathname]) return json(res,404,{});
     file=path.join(root,files[url.pathname]);
   }

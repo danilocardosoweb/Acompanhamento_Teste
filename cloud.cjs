@@ -18,6 +18,8 @@ module.exports=function(root){
   if(!res.ok){let message=await res.text();throw Error(`Serviço de dados (${res.status}): ${message.slice(0,400)}`);}return res;
  }
  const digest=b=>crypto.createHash('sha256').update(b).digest('hex');
+ const localFepRecords=()=>{try{const local=JSON.parse(fs.readFileSync(path.join(root,'dados/testes.json'),'utf8'));return Array.isArray(local.fepRecords)?local.fepRecords:[];}catch{return [];}};
+ const mergeFep=(remote)=>{const local=localFepRecords();return {...remote,fepRecords:Array.isArray(remote?.fepRecords)&&remote.fepRecords.length?remote.fepRecords:local};};
  async function buildPreview(file,key){
   const folder=path.join(root,'previews',key),manifest=path.join(folder,'manifest.json');
   if(fs.existsSync(manifest))return {folder,manifest};
@@ -57,17 +59,17 @@ module.exports=function(root){
    // Read back the stored database records; never mark an upload as confirmed from local data alone.
    const confirmed=await(await request('data')).json();
    if(confirmed.records.length<data.records.length)throw Error('A conferência dos registros enviados falhou.');
-   fs.writeFileSync(cachePath,JSON.stringify(confirmed));lastRead=Date.now();
+   fs.writeFileSync(cachePath,JSON.stringify(mergeFep(confirmed)));lastRead=Date.now();
    state={enabled:true,syncing:false,error:'',lastSync:new Date().toISOString(),records:result.records,attachments:count};saveState();
    return state;
   }catch(e){state={...state,syncing:false,error:e.message};saveState();throw e;}
  }
  function sync(){if(!running){running=perform().finally(()=>{running=null;});}return running;}
- function cached(){return JSON.parse(fs.readFileSync(cachePath,'utf8'));}
+ function cached(){return mergeFep(JSON.parse(fs.readFileSync(cachePath,'utf8')));}
  async function read(includeProduction=false){
   if(!state.enabled)throw Error('Serviço de dados não configurado.');
   if(!includeProduction&&Date.now()-lastRead<60000&&fs.existsSync(cachePath))return {...cached(),dataOrigin:'supabase'};
-  const load=async()=>{const data=await(await request('data',{query:includeProduction?{includeProduction:1}:undefined})).json();if(!data.updatedAt)throw Error('Primeira sincronização pendente.');if(!includeProduction){fs.writeFileSync(cachePath,JSON.stringify(data));lastRead=Date.now();}return {...data,dataOrigin:'supabase'};};
+  const load=async()=>{const data=mergeFep(await(await request('data',{query:includeProduction?{includeProduction:1}:undefined})).json());if(!data.updatedAt)throw Error('Primeira sincronização pendente.');if(!includeProduction){fs.writeFileSync(cachePath,JSON.stringify(data));lastRead=Date.now();}return {...data,dataOrigin:'supabase'};};
   if(includeProduction){if(!productionReadPromise)productionReadPromise=load().finally(()=>{productionReadPromise=null;});return productionReadPromise;}
   if(!readPromise)readPromise=load().finally(()=>{readPromise=null;});return readPromise;
  }
