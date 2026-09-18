@@ -123,15 +123,16 @@ Deno.serve(async req=>{
    const attachmentById=new Map(attachments.map(a=>[a.id,a]));
    for(const record of records){record.attachments=(record.attachments||[]).map((attachment,index)=>{const stored=attachmentById.get(`${record.id}-${index}`);if(!stored)return attachment;return {...attachment,cloudPath:stored.object_path,size:stored.size_bytes,sha256:stored.sha256,preview:stored.preview_manifest||attachment.preview};});}
    const state=await(await api('/rest/v1/quality_sync_state?id=eq.outlook-pcp&select=data,synced_at')).json();
-   const corrections=[];
+   const corrections=[],includeProduction=url.searchParams.get('includeProduction')==='1';let drawings=[],locationsByCorrection={};if(includeProduction){
    for(let offset=0;;offset+=1000){const page=await(await api(`/rest/v1/quality_corrections_view?select=*&order=source_uploaded_at.desc,id&limit=1000&offset=${offset}`)).json();corrections.push(...page);if(page.length<1000)break;}
    const importedProduction=[];
    for(let offset=0;;offset+=1000){const page=await(await api(`/rest/v1/quality_production_records?select=*&order=production_date.desc,created_at.desc&limit=1000&offset=${offset}`)).json();importedProduction.push(...page);if(page.length<1000)break;}
    const productionActions=await(await api('/rest/v1/quality_production_actions?select=*')).json(),productionActionById=new Map(productionActions.map(action=>[action.production_id,action]));
    for(const record of importedProduction){const action=productionActionById.get(record.id);corrections.push({id:record.id,source:'production_import',tool:record.tool,sequence:record.sequence,payload:record.payload||{},correction_text:action?.correction_text||'',corrected_at:action?.corrected_at||null,corrector:action?.corrector||'',files:[],locations:[]});}
-   const drawings=await(await api('/rest/v1/quality_tool_drawings?select=*&order=updated_at.desc')).json();
-   const locations=await(await api('/rest/v1/quality_correction_locations?select=*&order=created_at')).json(),locationsByCorrection={};for(const l of locations)(locationsByCorrection[l.correction_id]??=[]).push(l);
+   drawings=await(await api('/rest/v1/quality_tool_drawings?select=*&order=updated_at.desc')).json();
+   const locations=await(await api('/rest/v1/quality_correction_locations?select=*&order=created_at')).json();locationsByCorrection={};for(const l of locations)(locationsByCorrection[l.correction_id]??=[]).push(l);
    for(const correction of corrections)correction.locations=(locationsByCorrection[correction.id]||[]).map(l=>({id:l.id,drawingId:l.drawing_id,type:l.location_type,page:l.page_pdf,x:Number(l.x_normalized),y:Number(l.y_normalized),view:l.view_name,component:l.component,region:l.region,holeRegion:l.hole_region,action:l.action_name,value:l.measure_value,unit:l.unit_name,method:l.method_name,description:l.description,createdAt:l.created_at,createdByName:l.created_by_name}));
+   }
    // The source table name is historical. These rows are production notes,
    // matched to tests by the exact tool + sequence pair.
    return respond({...state[0]?.data,records,productionNotes:corrections,corrections,toolDrawings:drawings.map(d=>({id:d.id,tool:d.tool,sequence:d.sequence,name:d.name,objectPath:d.object_path,size:d.size_bytes,updatedAt:d.updated_at})),cloudSyncedAt:state[0]?.synced_at});

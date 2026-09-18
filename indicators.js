@@ -38,5 +38,3 @@ window.renderIndicators=function(){
  $('critical-tools').innerHTML=ranked.length?`<div class="critical-head"><span>Ferramenta</span><span>Categoria</span><span>Reprovações</span><span>Correções pendentes</span></div>${ranked.map(row=>`<div class="critical-row"><strong>${esc(row.tool)}</strong><span>${esc([...row.categories].join(' / '))}</span><b class="critical-number">${row.rejected}</b><b class="pending-number">${row.pending}</b></div>`).join('')}`:'<div class="empty">Nenhuma ferramenta crítica no período selecionado.</div>';
 };
 $('indicator-period').onchange=()=>window.renderIndicators();
-
-document.querySelectorAll('.nav-button').forEach(button=>button.onclick=()=>{document.querySelectorAll('.nav-button').forEach(b=>b.classList.toggle('active',b===button));const page=button.dataset.page;$('top-summary').hidden=page==='indicators';$('tracking-page').hidden=page!=='tracking';$('corrections-page').hidden=page!=='corrections';$('indicators-page').hidden=page!=='indicators';if(page==='corrections')window.renderCorrections();if(page==='indicators')window.renderIndicators();});
