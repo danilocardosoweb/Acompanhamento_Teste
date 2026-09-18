@@ -1,6 +1,7 @@
 const fs=require('fs');
 const path=require('path');
 const crypto=require('crypto');
+const {spawn}=require('child_process');
 module.exports=function(root){
  const credentialPath=path.join(root,'.cloud-credentials.json');
  const statusPath=path.join(root,'dados/cloud-status.json');
@@ -17,6 +18,16 @@ module.exports=function(root){
   if(!res.ok){let message=await res.text();throw Error(`Serviço de dados (${res.status}): ${message.slice(0,400)}`);}return res;
  }
  const digest=b=>crypto.createHash('sha256').update(b).digest('hex');
+ async function buildPreview(file,key){
+  const folder=path.join(root,'previews',key),manifest=path.join(folder,'manifest.json');
+  if(fs.existsSync(manifest))return {folder,manifest};
+  await new Promise((resolve,reject)=>{
+   const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(root,'visualizar.ps1'),'-Source',file,'-Destination',folder],{windowsHide:true});
+   let error='';const timer=setTimeout(()=>{child.kill();reject(Error('A preparação da pré-visualização demorou mais que o esperado.'));},120000);
+   child.stderr.on('data',chunk=>error+=chunk);child.on('error',reason=>{clearTimeout(timer);reject(reason);});child.on('close',code=>{clearTimeout(timer);if(code!==0)return reject(Error(error||'Não foi possível preparar a pré-visualização da planilha.'));if(!fs.existsSync(manifest))return reject(Error('A pré-visualização não gerou o índice de páginas.'));resolve();});
+  });
+  return {folder,manifest};
+ }
  async function perform(){
   if(!fs.existsSync(credentialPath))return;
   state={...state,enabled:true,syncing:true,error:''};saveState();
@@ -31,7 +42,7 @@ module.exports=function(root){
     const bytes=fs.readFileSync(file);a.sha256=digest(bytes);a.size=bytes.length;a.cloudPath=`originals/${a.sha256}${path.extname(file).toLowerCase()}`;
     await upload(a.cloudPath,file);count++;
     const key=crypto.createHash('sha256').update('preview-v1').update(bytes).digest('hex');
-    const folder=path.join(root,'previews',key),manifest=path.join(folder,'manifest.json');
+    const {folder,manifest}=await buildPreview(file,key);
     if(fs.existsSync(manifest)){
      a.preview={...JSON.parse(fs.readFileSync(manifest,'utf8')),key};
      for(const sheet of a.preview.sheets)for(const name of [sheet.file,...sheet.pages]){
