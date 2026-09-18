@@ -67,7 +67,8 @@ module.exports=function(root){
  async function saveToolDrawing({id,tool,sequence,name,bytes,user}){const object=`drawings/${id}/${Date.now()}-${crypto.randomBytes(5).toString('hex')}.pdf`;await request('file',{method:'PUT',body:bytes,type:'application/pdf',object});const result=await(await request('tool-drawing',{method:'POST',body:JSON.stringify({id,tool,sequence,name,objectPath:object,size:bytes.length,userId:user.id})})).json();lastRead=0;return {...result,objectPath:object};}
  async function saveLocation({location,correctionId,user}){await request('location',{method:'POST',body:JSON.stringify({...location,correctionId,userId:user.id,userName:user.name||user.email})});lastRead=0;}
  async function importCorrections(rows,user){await request('import-corrections',{method:'POST',body:JSON.stringify({rows,userId:user.id,userName:user.name||user.email})});lastRead=0;}
+ async function importProduction(rows,user){await request('import-production',{method:'POST',body:JSON.stringify({rows,userId:user.id,userName:user.name||user.email})});lastRead=0;}
  function findFile(id,index){const r=cached().records.find(r=>r.id===id);return r?.attachments[index];}
  function findCorrectionFile(id,index){const cache=cached(),c=(cache.productionNotes||cache.corrections||[]).find(c=>c.id===id);return c?.files[index];}
- return {sync,read,download,login,saveCorrection,saveToolDrawing,saveLocation,importCorrections,findFile,findCorrectionFile,status:()=>({...state}),enabled:()=>fs.existsSync(credentialPath)};
+ return {sync,read,download,login,saveCorrection,saveToolDrawing,saveLocation,importCorrections,importProduction,findFile,findCorrectionFile,status:()=>({...state}),enabled:()=>fs.existsSync(credentialPath)};
 };

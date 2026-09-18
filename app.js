@@ -18,7 +18,22 @@ let savedSidebar=false;
 try{savedSidebar=localStorage.getItem('quality-sidebar')==='collapsed'}catch{}
 setSidebar(savedSidebar);
 $('sidebar-toggle').onclick=()=>setSidebar(!document.body.classList.contains('sidebar-collapsed'));
-function renderAuth(){const signed=!!authUser;$('auth-user').hidden=!signed;$('logout').hidden=!signed;$('import-corrections').hidden=!signed;$('auth-user').textContent=signed?authUser.name||authUser.email:'';$('sync').hidden=signed&&!canSync;$('sync').textContent=signed?'↻ Atualizar e-mails':'Entrar';}
+function renderSettings(){
+ const signed=!!authUser, emailButton=$('settings-email-sync'), productionButton=$('settings-production-import');
+ emailButton.hidden=!signed; productionButton.hidden=!signed;
+ emailButton.disabled=!canSync;
+ $('settings-email-status').textContent=canSync?'Use este computador para consultar o Outlook e atualizar o painel.':'A coleta está configurada em outro computador. Abra o painel nele para atualizar os e-mails.';
+}
+function openPage(page){
+ document.querySelectorAll('.nav-button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
+ ['tracking','corrections','indicators','settings'].forEach(name=>$(name+'-page').hidden=name!==page);
+ if(page==='corrections')window.renderCorrections?.();
+ if(page==='indicators')window.renderIndicators?.();
+ if(page==='settings')renderSettings();
+}
+window.openPage=openPage;
+document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>openPage(button.dataset.page)));
+function renderAuth(){const signed=!!authUser;$('auth-user').hidden=!signed;$('logout').hidden=!signed;$('auth-user').textContent=signed?authUser.name||authUser.email:'';$('sync').textContent=signed?'Configurações':'Entrar';renderSettings();}
 function groups(){const map=new Map();for(const r of data.records){const key=r.tool||'Código não identificado';if(!map.has(key))map.set(key,[]);map.get(key).push(r);}for(const rows of map.values())rows.sort((a,b)=>sortDate(b).localeCompare(sortDate(a))||b.received.localeCompare(a.received));return map;}
 function latest(rows){const map=new Map();for(const r of rows){if(!map.has(r.sequence))map.set(r.sequence,r);}return [...map.values()];}
 function badge(s){return `<span class="badge ${esc(s)}">${esc(s)}</span>`;}
@@ -44,7 +59,9 @@ function render(){
 }
 async function refresh(){try{const state=await(await fetch('/api/status')).json();canSync=state.canSync!==false;$('sync').disabled=state.syncing;if(state.syncing)$('sync').textContent='↻ Coletando e-mails…';else renderAuth();const response=await fetch('/api/data');const next=await response.json();if(!response.ok)throw Error(next.warnings?.[0]||'Serviço de dados indisponível.');if(next.updatedAt!==lastVersion||!lastVersion){data=next;lastVersion=next.updatedAt;render();}$('sync-state').textContent=state.syncing?'Consultando o Outlook e atualizando os dados…':data.updatedAt?`Última atualização: ${stamp(data.updatedAt)} · Atualização automática a cada 15 minutos.`:'Nenhuma coleta concluída. Abra o Outlook e clique em Atualizar e-mails.';const warnings=[state.error,state.cloud?.error,...(data.warnings||[])].filter(Boolean);$('warning').hidden=!warnings.length;$('warning').textContent=warnings.join('\n');}catch(e){$('sync-state').textContent='Não foi possível consultar os dados: '+e.message;$('sync').disabled=false;}}
 async function startSync(){const response=await fetch('/api/sync',{method:'POST',headers:{'X-Painel':'local'}}),result=await response.json();if(response.status===401){authUser=null;renderAuth();$('login-dialog').showModal();return;}if(!response.ok)throw Error(result.error||'Não foi possível iniciar a coleta.');await refresh();}
-$('search').oninput=render;$('status').onchange=render;$('sync').onclick=()=>{if(!authUser){$('login-error').textContent='';$('login-dialog').showModal();$('login-email').focus();return;}startSync().catch(e=>$('sync-state').textContent=e.message);};
+$('search').oninput=render;$('status').onchange=render;$('sync').onclick=()=>{if(!authUser){$('login-error').textContent='';$('login-dialog').showModal();$('login-email').focus();return;}openPage('settings');};
+$('settings-email-sync').onclick=()=>startSync().catch(e=>$('settings-email-status').textContent=e.message);
+$('settings-production-import').onclick=()=>window.openProductionImport?.();
 $('login-cancel').onclick=()=>$('login-dialog').close();
 $('login-form').onsubmit=async e=>{e.preventDefault();$('login-submit').disabled=true;$('login-error').textContent='';try{const response=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json','X-Painel':'local'},body:JSON.stringify({email:$('login-email').value,password:$('login-password').value})}),result=await response.json();if(!response.ok)throw Error(result.error||'Usuário ou senha inválidos.');authUser=result.user;$('login-password').value='';$('login-dialog').close();renderAuth();window.renderCorrections?.();if(canSync)await startSync();else await refresh();}catch(err){$('login-error').textContent=err.message;}finally{$('login-submit').disabled=false;}};
 $('logout').onclick=async()=>{await fetch('/api/logout',{method:'POST',headers:{'X-Painel':'local'}});authUser=null;renderAuth();window.renderCorrections?.();};

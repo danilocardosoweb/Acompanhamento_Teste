@@ -66,6 +66,16 @@ Deno.serve(async req=>{
    }
    return respond({ok:true,imported:rows.length});
   }
+  if(action==='import-production'&&req.method==='POST') {
+   const body=await req.json(),rows=Array.isArray(body.rows)?body.rows:[],userId=String(body.userId||''),userName=String(body.userName||'').slice(0,200);
+   if(!/^[0-9a-f-]{36}$/.test(userId)||!rows.length||rows.length>10000)return respond({error:'Importação de produção inválida.'},400);
+   const importId=crypto.randomUUID(),sourceHash=await hash(new TextEncoder().encode(JSON.stringify(rows.map(r=>r.matchId))));
+   for(const row of rows){const id=String(row.matchId||''),tool=String(row.tool||'').trim().toUpperCase(),sequence=row.sequence==null?null:Number(row.sequence);if(!/^[0-9a-f-]{36}$/.test(id)||!tool||tool.length>80||(sequence!==null&&(!Number.isInteger(sequence)||sequence<1)))return respond({error:'Registro de produção inválido.'},400);}
+   await api('/rest/v1/quality_production_imports',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({id:importId,source_name:'Relatório de produção',source_hash:sourceHash,imported_by:userId,imported_by_name:userName,total_rows:rows.length,accepted_rows:rows.length})});
+   const records=rows.map(row=>({id:row.matchId,import_id:importId,source_fingerprint:`${row.matchId}`,tool:String(row.tool).toUpperCase(),sequence:row.sequence==null?null:Number(row.sequence),lot:row.lot==null?null:Number(row.lot),production_date:String(row.productionDate||'').match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)?String(row.productionDate).split('/').reverse().join('-'):null,source_row:Number(row.row)||null,payload:row.payload||{},updated_at:new Date().toISOString()}));
+   await api('/rest/v1/quality_production_records?on_conflict=id',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'},body:JSON.stringify(records)});
+   return respond({ok:true,imported:rows.length});
+  }
   if(action==='file') {
    const object=url.searchParams.get('path')||'';
    if(!validPath(object))return respond({error:'Invalid path'},400);
@@ -115,6 +125,9 @@ Deno.serve(async req=>{
    const state=await(await api('/rest/v1/quality_sync_state?id=eq.outlook-pcp&select=data,synced_at')).json();
    const corrections=[];
    for(let offset=0;;offset+=1000){const page=await(await api(`/rest/v1/quality_corrections_view?select=*&order=source_uploaded_at.desc,id&limit=1000&offset=${offset}`)).json();corrections.push(...page);if(page.length<1000)break;}
+   const importedProduction=await(await api('/rest/v1/quality_production_records?select=*&order=production_date.desc,created_at.desc')).json();
+   const productionActions=await(await api('/rest/v1/quality_production_actions?select=*')).json(),productionActionById=new Map(productionActions.map(action=>[action.production_id,action]));
+   for(const record of importedProduction){const action=productionActionById.get(record.id);corrections.push({id:record.id,source:'production_import',tool:record.tool,sequence:record.sequence,payload:record.payload||{},correction_text:action?.correction_text||'',corrected_at:action?.corrected_at||null,corrector:action?.corrector||'',files:[],locations:[]});}
    const drawings=await(await api('/rest/v1/quality_tool_drawings?select=*&order=updated_at.desc')).json();
    const locations=await(await api('/rest/v1/quality_correction_locations?select=*&order=created_at')).json(),locationsByCorrection={};for(const l of locations)(locationsByCorrection[l.correction_id]??=[]).push(l);
    for(const correction of corrections)correction.locations=(locationsByCorrection[correction.id]||[]).map(l=>({id:l.id,drawingId:l.drawing_id,type:l.location_type,page:l.page_pdf,x:Number(l.x_normalized),y:Number(l.y_normalized),view:l.view_name,component:l.component,region:l.region,holeRegion:l.hole_region,action:l.action_name,value:l.measure_value,unit:l.unit_name,method:l.method_name,description:l.description,createdAt:l.created_at,createdByName:l.created_by_name}));
