@@ -108,6 +108,10 @@ Deno.serve(async req=>{
   if(action==='data'&&req.method==='GET') {
    const records=[];
    for(let offset=0;;offset+=1000){const page=await(await api(`/rest/v1/quality_tests?select=source_record&order=received_at.desc,id&limit=1000&offset=${offset}`)).json();records.push(...page.map(r=>r.source_record));if(page.length<1000)break;}
+   const attachments=[];
+   for(let offset=0;;offset+=1000){const page=await(await api(`/rest/v1/quality_attachments?select=id,test_id,name,object_path,size_bytes,sha256,preview_manifest&limit=1000&offset=${offset}`)).json();attachments.push(...page);if(page.length<1000)break;}
+   const attachmentById=new Map(attachments.map(a=>[a.id,a]));
+   for(const record of records){record.attachments=(record.attachments||[]).map((attachment,index)=>{const stored=attachmentById.get(`${record.id}-${index}`);if(!stored)return attachment;return {...attachment,cloudPath:stored.object_path,size:stored.size_bytes,sha256:stored.sha256,preview:stored.preview_manifest||attachment.preview};});}
    const state=await(await api('/rest/v1/quality_sync_state?id=eq.outlook-pcp&select=data,synced_at')).json();
    const corrections=[];
    for(let offset=0;;offset+=1000){const page=await(await api(`/rest/v1/quality_corrections_view?select=*&order=source_uploaded_at.desc,id&limit=1000&offset=${offset}`)).json();corrections.push(...page);if(page.length<1000)break;}

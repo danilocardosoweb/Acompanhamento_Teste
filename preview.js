@@ -22,6 +22,11 @@ function showSheet(index){
  ve('viewer-pages').scrollTop=0;
  setPreviewZoom(100);
 }
+function showDirectPdf(button){
+ ve('viewer-tools').hidden=true;
+ const url=`/attachment?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}&mode=inline`;
+ ve('viewer-pages').innerHTML=`<iframe class="direct-pdf-viewer" src="${url}" title="${esc(button.dataset.name)}"></iframe>`;
+}
 document.addEventListener('click',async event=>{
  const button=event.target.closest('.preview-button');
  if(!button)return;
@@ -38,6 +43,7 @@ document.addEventListener('click',async event=>{
    if(request!==previewRequest)return;
    if(!response.ok)throw Error(result.error||'Não foi possível abrir o documento.');
    previewData=result;
+   if(result.directPdf){showDirectPdf(button);return;}
    if(!result.sheets.length)throw Error('Nenhuma aba visível encontrada.');
    ve('viewer-tools').hidden=false;showSheet(0);
  }catch(error){if(request===previewRequest)ve('viewer-pages').innerHTML=`<div class="preview-loading" role="alert">${esc(error.message)}<p>Você ainda pode baixar o arquivo original pelo painel.</p></div>`;}
