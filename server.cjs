@@ -141,4 +141,4 @@ const server = http.createServer((req,res) => {
   fs.readFile(file,(err,buf)=>{if(err)return json(res,404,{});res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(buf);});
 });
 server.on('error',e=>{if(e.code==='EADDRINUSE')process.exit(0);console.error(e);process.exit(1);});
-server.listen(port,'127.0.0.1',()=>{console.log(`Painel local: http://127.0.0.1:${port}\nDados conectados. Atualizacao a cada 15 minutos.`);sync();setInterval(sync,15*60*1000);});
+server.listen(port,'127.0.0.1',()=>{console.log(`Painel local: http://127.0.0.1:${port}\nDados conectados. Atualização automática a cada 1 hora enquanto o painel estiver aberto.`);sync();setInterval(sync,60*60*1000);});
