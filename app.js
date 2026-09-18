@@ -30,7 +30,7 @@ setSidebar(savedSidebar);
 $('sidebar-toggle').onclick=()=>setSidebar(!document.body.classList.contains('sidebar-collapsed'));
 function renderSettings(){
  const signed=!!authUser, emailButton=$('settings-email-sync'), productionButton=$('settings-production-import');
- emailButton.hidden=!signed; productionButton.hidden=!signed;
+ emailButton.hidden=!signed; productionButton.hidden=!signed;whatsappButton.hidden=!signed;$('settings-whatsapp-status').textContent=signed?'Defina os grupos e os eventos que o bot deve enviar.':'Entre no sistema para configurar.';
  emailButton.disabled=!canSync;
  $('settings-email-status').textContent=canSync?'Use este computador para consultar o Outlook e atualizar o painel.':'A coleta está configurada em outro computador. Abra o painel nele para atualizar os e-mails.';
 }

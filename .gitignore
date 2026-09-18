@@ -5,3 +5,6 @@ previews/
 *.log
 
 node_modules/
+whatsapp-bot/node_modules/
+whatsapp-bot/.session/
+whatsapp-bot/.env

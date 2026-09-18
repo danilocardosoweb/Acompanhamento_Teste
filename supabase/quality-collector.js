@@ -13,6 +13,16 @@ async function api(route,options={}) {
 const hash=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
 const validPath=p=>/^originals\/[a-f0-9]{64}\.(xlsx|xls|xlsm|xlsb|csv|pdf)$/.test(p)||/^previews\/[a-f0-9]{64}\/sheet-\d+(?:-\d+)?\.(png|pdf)$/.test(p)||/^corrections\/[0-9a-f-]{36}\/[a-zA-Z0-9._-]+$/.test(p)||/^drawings\/[0-9a-f-]{36}\/[a-zA-Z0-9._-]+\.pdf$/.test(p);
 async function upsert(table,body){return api(`/rest/v1/${table}?on_conflict=id`,{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'},body:JSON.stringify(body)});}
+const whatsappTitle={novo_teste:'Novo teste realizado',ferramenta_aprovada:'Ferramenta aprovada',ferramenta_reprovada:'Ferramenta reprovada',nova_correcao:'Nova correção cadastrada'};
+async function enqueueWhatsapp(event){
+ const enabled=await(await api(`/rest/v1/quality_whatsapp_event_settings?event_type=eq.${encodeURIComponent(event.type)}&enabled=eq.true&select=event_type`)).json();
+ if(!enabled.length)return;
+ const groups=await(await api('/rest/v1/quality_whatsapp_groups?active=eq.true&select=id,name,whatsapp_group_id')).json();
+ for(const group of groups){
+  const row={event_key:`${event.key}:${group.id}`,event_type:event.type,entity_id:event.entityId||'',tool:event.tool||'',title:whatsappTitle[event.type]||event.type,message:event.message||'',metadata:event.metadata||{},responsible:event.responsible||'',event_status:event.status||'',event_at:event.at||new Date().toISOString(),whatsapp_group_id:group.whatsapp_group_id,whatsapp_group_name:group.name,updated_at:new Date().toISOString()};
+  await api('/rest/v1/quality_whatsapp_notifications?on_conflict=event_key',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=ignore-duplicates'},body:JSON.stringify(row)});
+ }
+}
 Deno.serve(async req=>{
  try {
   const token=req.headers.get('x-collector-token')||'';
@@ -29,6 +39,19 @@ Deno.serve(async req=>{
    if(!users.length)return respond({error:'Usuário ou senha inválidos.'},401);
    return respond({user:{id:users[0].user_id,email:users[0].email,name:users[0].name,role:users[0].role}});
   }
+  if(action==='whatsapp-settings'&&req.method==='GET') {
+   const [groups,events]=await Promise.all([api('/rest/v1/quality_whatsapp_groups?select=*&order=name'),api('/rest/v1/quality_whatsapp_event_settings?select=*&order=event_type')]);
+   return respond({groups:await groups.json(),events:await events.json()});
+  }
+  if(action==='whatsapp-settings'&&req.method==='POST') {
+   const body=await req.json(),groups=Array.isArray(body.groups)?body.groups:[],events=Array.isArray(body.events)?body.events:[];
+   if(groups.length>10||events.length>8)return respond({error:'Configuração inválida.'},400);
+   for(const group of groups){const name=String(group.name||'').trim(),groupId=String(group.whatsappGroupId||'').trim();if(!name||!groupId||name.length>120||groupId.length>160)return respond({error:'Grupo de WhatsApp inválido.'},400);await api('/rest/v1/quality_whatsapp_groups?on_conflict=whatsapp_group_id',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'},body:JSON.stringify({name,whatsapp_group_id:groupId,active:group.active!==false,updated_at:new Date().toISOString()})});}
+   for(const event of events){if(!Object.prototype.hasOwnProperty.call(whatsappTitle,event.type)&&!['ferramenta_liberada','ferramenta_enviada_correcao','ferramenta_recebida','ferramenta_atrasada'].includes(event.type))return respond({error:'Evento inválido.'},400);await api('/rest/v1/quality_whatsapp_event_settings?on_conflict=event_type',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'},body:JSON.stringify({event_type:event.type,enabled:!!event.enabled,updated_at:new Date().toISOString()})});}
+   return respond({ok:true});
+  }
+  if(action==='whatsapp-notifications'&&req.method==='GET')return respond({notifications:await(await api('/rest/v1/quality_whatsapp_notifications?select=*&order=created_at.desc&limit=100')).json()});
+  if(action==='whatsapp-retry'&&req.method==='POST') {const body=await req.json(),id=String(body.id||'');if(!/^[0-9a-f-]{36}$/.test(id))return respond({error:'Notificação inválida.'},400);await api(`/rest/v1/quality_whatsapp_notifications?id=eq.${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({delivery_status:'pendente',last_error:null,locked_at:null,locked_by:null,updated_at:new Date().toISOString()})});return respond({ok:true});}
   if(action==='correction'&&req.method==='POST') {
    const body=await req.json(),id=String(body.id||''),userId=String(body.userId||''),text=String(body.text||'').trim();
    if(!/^[0-9a-f-]{36}$/.test(id)||!/^[0-9a-f-]{36}$/.test(userId)||text.length>10000)return respond({error:'Dados de correção inválidos.'},400);
@@ -38,6 +61,8 @@ Deno.serve(async req=>{
     if(!validPath(f.objectPath)||!f.objectPath.startsWith(`corrections/${id}/`)||!/^.+\.(xlsx|xls|xlsm|xlsb|pdf)$/i.test(f.name)||!Number.isSafeInteger(f.size)||f.size<1||f.size>25*1024*1024)return respond({error:'Arquivo inválido.'},400);
     await api('/rest/v1/quality_correction_files?on_conflict=object_path',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'},body:JSON.stringify({correction_id:id,name:String(f.name).slice(0,255),object_path:f.objectPath,size_bytes:f.size,mime_type:String(f.mimeType||'application/octet-stream').slice(0,120)})});
    }
+   const linked=await(await api(`/rest/v1/quality_corrections_view?id=eq.${id}&select=tool,sequence&limit=1`)).json();
+   if(linked[0])await enqueueWhatsapp({type:'nova_correcao',key:`correction:${id}:${text}`,entityId:id,tool:linked[0].tool,responsible:String(body.userName||''),message:text,metadata:{correction:text,test:linked[0].sequence},at:new Date().toISOString()});
    return respond({ok:true});
   }
   if(action==='tool-drawing'&&req.method==='POST') {
@@ -110,7 +135,9 @@ Deno.serve(async req=>{
      files.push({id:`${r.id}-${i}`,test_id:r.id,name:a.name,object_path:a.cloudPath,size_bytes:a.size,sha256:a.sha256,preview_manifest:a.preview||null,synced_at:new Date().toISOString()});
     }
    }
+   const previousRows=await(await api('/rest/v1/quality_tests?select=id,result')).json(),previousById=new Map(previousRows.map(row=>[row.id,row.result]));
    if(rows.length)await upsert('quality_tests',rows);
+   for(const row of rows){const previous=previousById.get(row.id);if(previous===undefined){await enqueueWhatsapp({type:'novo_teste',key:`test:new:${row.id}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number,reason:row.comment},at:row.received_at});}if((previous===undefined||previous!==row.result)&&row.result==='APROVADO')await enqueueWhatsapp({type:'ferramenta_aprovada',key:`test:approved:${row.id}:${row.result}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number},at:row.received_at});if((previous===undefined||previous!==row.result)&&row.result==='REPROVADO')await enqueueWhatsapp({type:'ferramenta_reprovada',key:`test:rejected:${row.id}:${row.result}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number,reason:row.comment},at:row.received_at});}
    if(files.length)await upsert('quality_attachments',files);
    await upsert('quality_sync_state',{id:'outlook-pcp',data:{updatedAt:data.updatedAt,source:data.source,warnings:data.warnings||[],skipped:data.skipped},synced_at:new Date().toISOString()});
    return respond({ok:true,records:rows.length,attachments:files.length});
