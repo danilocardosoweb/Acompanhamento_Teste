@@ -10,3 +10,8 @@ whatsapp-bot/.session/
 whatsapp-bot/.wwebjs_cache/
 whatsapp-bot/.env
 whatsapp-bot/whatsapp-qr.png
+whatsapp-bot/whatsapp-status.json
+whatsapp-bot/whatsapp-summary-command-*.json
+whatsapp-bot/whatsapp-summary-result-*.json
+.agents/
+.ui-backup/

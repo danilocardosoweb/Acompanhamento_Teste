@@ -34,9 +34,10 @@ let savedSidebar=false;
 try{savedSidebar=localStorage.getItem('quality-sidebar')==='collapsed'}catch{}
 setSidebar(savedSidebar);
 $('sidebar-toggle').onclick=()=>setSidebar(!document.body.classList.contains('sidebar-collapsed'));
+const mobileMenu=$('mobile-menu-toggle');mobileMenu.onclick=()=>{const open=document.body.classList.toggle('menu-open');mobileMenu.setAttribute('aria-expanded',String(open));mobileMenu.setAttribute('aria-label',open?'Fechar menu':'Abrir menu');};document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>{document.body.classList.remove('menu-open');mobileMenu?.setAttribute('aria-expanded','false');mobileMenu?.setAttribute('aria-label','Abrir menu');}));
 function renderSettings(){
- const signed=!!authUser, emailButton=$('settings-email-sync'), productionButton=$('settings-production-import'), whatsappButton=$('settings-whatsapp');
- emailButton.hidden=!signed; productionButton.hidden=!signed;whatsappButton.hidden=!signed;$('settings-whatsapp-status').textContent=signed?'Defina os grupos e os eventos que o bot deve enviar.':'Entre no sistema para configurar.';
+ const signed=!!authUser, emailButton=$('settings-email-sync'), productionButton=$('settings-production-import'), correctionButton=$('settings-correction-import'), whatsappButton=$('settings-whatsapp');
+ emailButton.hidden=!signed; productionButton.hidden=!signed; correctionButton.hidden=!signed; whatsappButton.hidden=!signed;$('settings-whatsapp-status').textContent=signed?'Defina os grupos e os eventos que o bot deve enviar.':'Entre no sistema para configurar.';
  emailButton.disabled=!canSync;
  $('settings-email-status').textContent=canSync?'Use este computador para consultar o Outlook e atualizar o painel.':'A coleta está configurada em outro computador. Abra o painel nele para atualizar os e-mails.';
 }
@@ -79,7 +80,7 @@ async function refresh(){try{const state=await(await fetch('/api/status')).json(
 async function startSync(){const response=await fetch('/api/sync',{method:'POST',headers:{'X-Painel':'local'}}),result=await response.json();if(response.status===401){authUser=null;renderAuth();$('login-dialog').showModal();return;}if(!response.ok)throw Error(result.error||'Não foi possível iniciar a coleta.');await refresh();}
 $('search').oninput=render;$('status').onchange=render;$('sync').onclick=()=>{if(!authUser){$('login-error').textContent='';$('login-dialog').showModal();$('login-email').focus();return;}openPage('settings');};
 $('settings-email-sync').onclick=()=>startSync().catch(e=>$('settings-email-status').textContent=e.message);
-$('settings-production-import').onclick=()=>window.openProductionImport?.();
+$('settings-production-import').onclick=()=>window.openProductionImport?.();$('settings-correction-import').onclick=()=>window.openCorrectionImport?.();
 $('login-cancel').onclick=()=>$('login-dialog').close();
 $('login-form').onsubmit=async e=>{e.preventDefault();$('login-submit').disabled=true;$('login-error').textContent='';try{const response=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json','X-Painel':'local'},body:JSON.stringify({email:$('login-email').value,password:$('login-password').value})}),result=await response.json();if(!response.ok)throw Error(result.error||'Usuário ou senha inválidos.');authUser=result.user;$('login-password').value='';$('login-dialog').close();renderAuth();if(productionLoaded)window.renderCorrections?.();if(canSync)await startSync();else await refresh();}catch(err){$('login-error').textContent=err.message;}finally{$('login-submit').disabled=false;}};
 $('logout').onclick=async()=>{await fetch('/api/logout',{method:'POST',headers:{'X-Painel':'local'}});authUser=null;renderAuth();if(productionLoaded)window.renderCorrections?.();};

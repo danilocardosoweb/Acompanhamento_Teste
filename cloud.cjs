@@ -82,7 +82,11 @@ module.exports=function(root){
  async function saveLocation({location,correctionId,user}){await request('location',{method:'POST',body:JSON.stringify({...location,correctionId,userId:user.id,userName:user.name||user.email})});lastRead=0;}
  async function importCorrections(rows,user){await request('import-corrections',{method:'POST',body:JSON.stringify({rows,userId:user.id,userName:user.name||user.email})});lastRead=0;}
  async function importProduction(rows,user){await request('import-production',{method:'POST',body:JSON.stringify({rows,userId:user.id,userName:user.name||user.email})});lastRead=0;}
+ async function whatsappSettings(){return await(await request('whatsapp-settings')).json();}
+ async function saveWhatsappSettings(body){return await(await request('whatsapp-settings',{method:'POST',body:JSON.stringify(body)})).json();}
+ async function whatsappNotifications(){return await(await request('whatsapp-notifications')).json();}
+ async function retryWhatsapp(id){return await(await request('whatsapp-retry',{method:'POST',body:JSON.stringify({id})})).json();}
  function findFile(id,index){const r=cached().records.find(r=>r.id===id);return r?.attachments[index];}
  function findCorrectionFile(id,index){const cache=cached(),c=(cache.productionNotes||cache.corrections||[]).find(c=>c.id===id);return c?.files[index];}
- return {sync,read,download,login,saveCorrection,saveToolDrawing,saveLocation,importCorrections,importProduction,findFile,findCorrectionFile,status:()=>({...state}),enabled:()=>fs.existsSync(credentialPath)};
+ return {sync,read,download,login,saveCorrection,saveToolDrawing,saveLocation,importCorrections,importProduction,whatsappSettings,saveWhatsappSettings,whatsappNotifications,retryWhatsapp,findFile,findCorrectionFile,status:()=>({...state}),enabled:()=>fs.existsSync(credentialPath)};
 };
