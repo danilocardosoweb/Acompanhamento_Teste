@@ -43,9 +43,16 @@ window.renderIndicators=function(){
  $('status-distribution').innerHTML=`<div class="donut-wrap"><div class="donut" style="--approved:${indicatorPercent(approved,latestRows.length)};--rejected:${indicatorPercent(rejected,latestRows.length)}"><div><strong>${latestRows.length}</strong><span>sequências</span></div></div><div class="status-list"><div><span><i class="legend-approved"></i>Aprovadas</span><strong>${approved}</strong></div><div><span><i class="legend-rejected"></i>Reprovadas</span><strong>${rejected}</strong></div><div><span><i class="legend-review"></i>A revisar</span><strong>${review}</strong></div></div></div>`;
  $('test-efficiency').innerHTML=`<div class="efficiency-item"><span>Testes realizados</span><strong>${records.length}</strong><small>${histories.length} sequência(s) acompanhada(s)</small></div><div class="efficiency-item"><span>Aprovadas no primeiro teste</span><strong>${firstPass}</strong><small>${indicatorPercent(firstPass,histories.length)}% das sequências</small></div><div class="efficiency-item"><span>Aprovadas após reteste</span><strong>${approvedAfterRetest}</strong><small>${approvedAfterRetest?`${approvedAfterRetest} aprovação no segundo teste`:'Nenhuma aprovação após reteste'}</small></div><div class="efficiency-item"><span>Retestes realizados</span><strong>${retests}</strong><small>${Math.max(0,retests-approvedAfterRetest)} ainda sem aprovação</small></div>`;
  const critical=new Map();
- latestRows.filter(r=>r.status==='REPROVADO').forEach(r=>{const row=critical.get(r.tool)||{tool:r.tool,rejected:0,pending:0,categories:new Set()};row.rejected++;row.categories.add(indicatorCategory(r.sequence));critical.set(r.tool,row);});
+ histories.forEach(rows=>{
+  const rejectedInHistory=rows.filter(r=>r.status==='REPROVADO').length;
+  if(!rejectedInHistory)return;
+  const first=rows[0],row=critical.get(first.tool)||{tool:first.tool,rejected:0,pending:0,categories:new Set()};
+  row.rejected+=rejectedInHistory;
+  row.categories.add(indicatorCategory(first.sequence));
+  critical.set(first.tool,row);
+ });
  pending.forEach(note=>{const row=critical.get(note.tool)||{tool:note.tool,rejected:0,pending:0,categories:new Set()};row.pending++;row.categories.add(indicatorCategory(note.sequence));critical.set(note.tool,row);});
  const ranked=[...critical.values()].sort((a,b)=>(b.rejected*2+b.pending)-(a.rejected*2+a.pending)||a.tool.localeCompare(b.tool,'pt-BR',{numeric:true})).slice(0,8);
- $('critical-tools').innerHTML=ranked.length?`<div class="critical-head"><span>Ferramenta</span><span>Categoria</span><span>Reprovações</span><span>Correções pendentes</span></div>${ranked.map(row=>`<div class="critical-row"><strong>${esc(row.tool)}</strong><span>${esc([...row.categories].join(' / '))}</span><b class="critical-number">${row.rejected}</b><b class="pending-number">${row.pending}</b></div>`).join('')}`:'<div class="empty">Nenhuma ferramenta crítica no período selecionado.</div>';
+ $('critical-tools').innerHTML=ranked.length?`<div class="critical-head"><span>Ferramenta</span><span>Categoria</span><span>Reprovações no histórico</span><span>Correções pendentes</span></div>${ranked.map(row=>`<div class="critical-row"><strong>${esc(row.tool)}</strong><span>${esc([...row.categories].join(' / '))}</span><b class="critical-number">${row.rejected}</b><b class="pending-number">${row.pending}</b></div>`).join('')}`:'<div class="empty">Nenhuma ferramenta crítica no período selecionado.</div>';
 };
 $('indicator-period').onchange=()=>window.renderIndicators();
