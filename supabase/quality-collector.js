@@ -125,7 +125,8 @@ Deno.serve(async req=>{
    const state=await(await api('/rest/v1/quality_sync_state?id=eq.outlook-pcp&select=data,synced_at')).json();
    const corrections=[];
    for(let offset=0;;offset+=1000){const page=await(await api(`/rest/v1/quality_corrections_view?select=*&order=source_uploaded_at.desc,id&limit=1000&offset=${offset}`)).json();corrections.push(...page);if(page.length<1000)break;}
-   const importedProduction=await(await api('/rest/v1/quality_production_records?select=*&order=production_date.desc,created_at.desc')).json();
+   const importedProduction=[];
+   for(let offset=0;;offset+=1000){const page=await(await api(`/rest/v1/quality_production_records?select=*&order=production_date.desc,created_at.desc&limit=1000&offset=${offset}`)).json();importedProduction.push(...page);if(page.length<1000)break;}
    const productionActions=await(await api('/rest/v1/quality_production_actions?select=*')).json(),productionActionById=new Map(productionActions.map(action=>[action.production_id,action]));
    for(const record of importedProduction){const action=productionActionById.get(record.id);corrections.push({id:record.id,source:'production_import',tool:record.tool,sequence:record.sequence,payload:record.payload||{},correction_text:action?.correction_text||'',corrected_at:action?.corrected_at||null,corrector:action?.corrector||'',files:[],locations:[]});}
    const drawings=await(await api('/rest/v1/quality_tool_drawings?select=*&order=updated_at.desc')).json();
