@@ -4,13 +4,19 @@ const date=s=>s?new Date(s.length===10?s+'T12:00:00':s).toLocaleDateString('pt-B
 const stamp=s=>s?new Date(s).toLocaleString('pt-BR'):'';
 const sortDate=r=>(r.testDate||r.received.slice(0,10))+'T'+r.received.slice(11);
 let data={records:[]}, selected='', lastVersion='', wasSyncing=false, authUser=null, canSync=true, productionLoaded=false, productionLoading=null;
+function normalizeProductionData(next){
+ const source=(next.productionRecords?.length?next.productionRecords:next.productionNotes?.length?next.productionNotes:next.corrections)||[];
+ const records=source.map(note=>{const original=note.payload||{},stop=String(original['Cod Parada']??'').trim(),routine=/^001\b|PEDIDO ATENDIDO/i.test(stop),stopLabel=stop.replace(/^\d+\s*-?\s*/,'').trim(),observation=String(original['Obs do Lote']??'').trim()||String(original['Observação Lote']??'').trim(),description=String(original['Descrição']??'').trim()||(!routine&&stop?stopLabel:'');return {...note,payload:{...original,'Data':original['Data']??original['Data Produção'],'Obs do Lote':observation,'Descrição':description}};});
+ const notes=records.filter(note=>{const payload=note.payload||{};return [payload['Descrição'],payload['Obs do Lote'],payload['Correção Efetuada'],note.correction_text].some(value=>String(value??'').trim())||(note.files||[]).length>0||(note.locations||[]).length>0;});
+ return {...next,productionRecords:records,productionNotes:notes,corrections:notes};
+}
 async function loadProductionData(){
  if(productionLoaded)return;
  if(productionLoading)return productionLoading;
  productionLoading=(async()=>{
   const response=await fetch('/api/data?includeProduction=1'),next=await response.json();
   if(!response.ok)throw Error(next.warnings?.[0]||'Não foi possível carregar os apontamentos de produção.');
-  data={...data,...next};productionLoaded=true;
+  data={...data,...normalizeProductionData(next)};productionLoaded=true;
  })().finally(()=>{productionLoading=null;});
  return productionLoading;
 }
@@ -75,6 +81,6 @@ $('search').oninput=render;$('status').onchange=render;$('sync').onclick=()=>{if
 $('settings-email-sync').onclick=()=>startSync().catch(e=>$('settings-email-status').textContent=e.message);
 $('settings-production-import').onclick=()=>window.openProductionImport?.();
 $('login-cancel').onclick=()=>$('login-dialog').close();
-$('login-form').onsubmit=async e=>{e.preventDefault();$('login-submit').disabled=true;$('login-error').textContent='';try{const response=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json','X-Painel':'local'},body:JSON.stringify({email:$('login-email').value,password:$('login-password').value})}),result=await response.json();if(!response.ok)throw Error(result.error||'Usuário ou senha inválidos.');authUser=result.user;$('login-password').value='';$('login-dialog').close();renderAuth();window.renderCorrections?.();if(canSync)await startSync();else await refresh();}catch(err){$('login-error').textContent=err.message;}finally{$('login-submit').disabled=false;}};
-$('logout').onclick=async()=>{await fetch('/api/logout',{method:'POST',headers:{'X-Painel':'local'}});authUser=null;renderAuth();window.renderCorrections?.();};
-fetch('/api/auth').then(r=>r.json()).then(r=>{authUser=r.user;renderAuth();window.renderCorrections?.();});refresh();setInterval(refresh,60000);setInterval(()=>{if(authUser&&canSync)startSync().catch(e=>$('settings-email-status').textContent=e.message);},60*60*1000);
+$('login-form').onsubmit=async e=>{e.preventDefault();$('login-submit').disabled=true;$('login-error').textContent='';try{const response=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json','X-Painel':'local'},body:JSON.stringify({email:$('login-email').value,password:$('login-password').value})}),result=await response.json();if(!response.ok)throw Error(result.error||'Usuário ou senha inválidos.');authUser=result.user;$('login-password').value='';$('login-dialog').close();renderAuth();if(productionLoaded)window.renderCorrections?.();if(canSync)await startSync();else await refresh();}catch(err){$('login-error').textContent=err.message;}finally{$('login-submit').disabled=false;}};
+$('logout').onclick=async()=>{await fetch('/api/logout',{method:'POST',headers:{'X-Painel':'local'}});authUser=null;renderAuth();if(productionLoaded)window.renderCorrections?.();};
+fetch('/api/auth').then(r=>r.json()).then(r=>{authUser=r.user;renderAuth();if(productionLoaded)window.renderCorrections?.();});refresh();setInterval(refresh,60000);setInterval(()=>{if(authUser&&canSync)startSync().catch(e=>$('settings-email-status').textContent=e.message);},60*60*1000);

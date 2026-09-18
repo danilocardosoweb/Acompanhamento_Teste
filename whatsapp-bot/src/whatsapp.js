@@ -11,5 +11,14 @@ function createWhatsapp(){
  client.on('disconnected',reason=>log.warn('WhatsApp desconectado.',reason));
  return client;
 }
-async function listGroups(client){const chats=await client.getChats();return chats.filter(chat=>chat.isGroup).map(chat=>({name:chat.name,id:chat.id._serialized})).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));}
+async function listGroups(client){
+ const chats=await client.pupPage.evaluate(()=>{
+  const models=window.require('WAWebCollections').Chat.getModelsArray();
+  return models.map(chat=>{
+   const wid=chat?.id,serialized=wid?._serialized||wid?.$1||(wid?.user&&wid?.server?`${wid.user}@${wid.server}`:null);
+   return {name:String(chat?.name||chat?.formattedTitle||''),id:serialized,isGroup:Boolean(chat?.groupMetadata||String(serialized||'').endsWith('@g.us'))};
+  }).filter(chat=>chat.isGroup&&chat.id&&chat.name);
+ });
+ return chats.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
+}
 module.exports={createWhatsapp,listGroups};

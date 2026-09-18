@@ -4,11 +4,18 @@
   "version": "1.0.0",
   "description": "Bot centralizado de notificações do Sistema de Ferramentas",
   "type": "commonjs",
-  "scripts": { "start": "node src/index.js", "groups": "node src/index.js --listar-grupos", "test-message": "node src/index.js --teste" },
-  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/index.js",
+    "groups": "node src/index.js --listar-grupos",
+    "test-message": "node src/index.js --teste"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
     "dotenv": "^16.6.1",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.34.7"
   }

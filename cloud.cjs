@@ -7,13 +7,13 @@ module.exports=function(root){
  const statusPath=path.join(root,'dados/cloud-status.json');
  const cachePath=path.join(root,'dados/cloud-cache.json');
  const uploadPath=path.join(root,'dados/cloud-uploads.json');
- let running=null,readPromise=null,lastRead=0;
+ let running=null,readPromise=null,productionReadPromise=null,lastRead=0;
  let state={enabled:fs.existsSync(credentialPath),syncing:false,error:'',lastSync:null};
  try{state={...state,...JSON.parse(fs.readFileSync(statusPath,'utf8')),syncing:false};}catch{}
  const saveState=()=>{fs.mkdirSync(path.dirname(statusPath),{recursive:true});fs.writeFileSync(statusPath,JSON.stringify(state));};
  function config(){const c=JSON.parse(fs.readFileSync(credentialPath,'utf8'));if(c.endpoint!=='https://sldhpwtdipndnljbzojm.supabase.co/functions/v1/quality-collector')throw Error('Configuração do serviço de dados inválida.');return c;}
- async function request(action,{method='GET',body,type='application/json',object}={}){
-  const c=config(),url=new URL(c.endpoint);url.searchParams.set('action',action);if(object)url.searchParams.set('path',object);
+ async function request(action,{method='GET',body,type='application/json',object,query}={}){
+  const c=config(),url=new URL(c.endpoint);url.searchParams.set('action',action);if(object)url.searchParams.set('path',object);for(const [key,value] of Object.entries(query||{}))if(value!==undefined&&value!==null)url.searchParams.set(key,String(value));
   const res=await fetch(url,{method,headers:{'x-collector-token':c.token,'Content-Type':type},body,signal:AbortSignal.timeout(60000)});
   if(!res.ok){let message=await res.text();throw Error(`Serviço de dados (${res.status}): ${message.slice(0,400)}`);}return res;
  }
@@ -39,15 +39,17 @@ module.exports=function(root){
    let count=0;
    for(const record of data.records){for(const a of record.attachments){
     const file=path.resolve(root,a.path);if(!file.startsWith(path.join(root,'anexos')+path.sep))throw Error('Caminho de anexo inválido.');
-    const bytes=fs.readFileSync(file);a.sha256=digest(bytes);a.size=bytes.length;a.cloudPath=`originals/${a.sha256}${path.extname(file).toLowerCase()}`;
+    const bytes=fs.readFileSync(file),ext=path.extname(file).toLowerCase();a.sha256=digest(bytes);a.size=bytes.length;a.cloudPath=`originals/${a.sha256}${ext}`;
     await upload(a.cloudPath,file);count++;
-    const key=crypto.createHash('sha256').update('preview-v1').update(bytes).digest('hex');
-    const {folder,manifest}=await buildPreview(file,key);
-    if(fs.existsSync(manifest)){
-     a.preview={...JSON.parse(fs.readFileSync(manifest,'utf8')),key};
-     for(const sheet of a.preview.sheets)for(const name of [sheet.file,...sheet.pages]){
-      if(!/^sheet-\d+(?:-\d+)?\.(png|pdf)$/.test(name))throw Error('Arquivo de visualização inválido.');
-      await upload(`previews/${key}/${name}`,path.join(folder,name));
+    if(ext!=='.pdf'){
+     const key=crypto.createHash('sha256').update('preview-v1').update(bytes).digest('hex');
+     const {folder,manifest}=await buildPreview(file,key);
+     if(fs.existsSync(manifest)){
+      a.preview={...JSON.parse(fs.readFileSync(manifest,'utf8')),key};
+      for(const sheet of a.preview.sheets)for(const name of [sheet.file,...sheet.pages]){
+       if(!/^sheet-\d+(?:-\d+)?\.(png|pdf)$/.test(name))throw Error('Arquivo de visualização inválido.');
+       await upload(`previews/${key}/${name}`,path.join(folder,name));
+      }
      }
     }
    }}
@@ -62,11 +64,12 @@ module.exports=function(root){
  }
  function sync(){if(!running){running=perform().finally(()=>{running=null;});}return running;}
  function cached(){return JSON.parse(fs.readFileSync(cachePath,'utf8'));}
- async function read(){
+ async function read(includeProduction=false){
   if(!state.enabled)throw Error('Serviço de dados não configurado.');
-  if(Date.now()-lastRead<60000&&fs.existsSync(cachePath))return {...cached(),dataOrigin:'supabase'};
-  if(!readPromise)readPromise=(async()=>{try{const data=await(await request('data')).json();if(!data.updatedAt)throw Error('Primeira sincronização pendente.');fs.writeFileSync(cachePath,JSON.stringify(data));lastRead=Date.now();return {...data,dataOrigin:'supabase'};}finally{readPromise=null;}})();
-  return readPromise;
+  if(!includeProduction&&Date.now()-lastRead<60000&&fs.existsSync(cachePath))return {...cached(),dataOrigin:'supabase'};
+  const load=async()=>{const data=await(await request('data',{query:includeProduction?{includeProduction:1}:undefined})).json();if(!data.updatedAt)throw Error('Primeira sincronização pendente.');if(!includeProduction){fs.writeFileSync(cachePath,JSON.stringify(data));lastRead=Date.now();}return {...data,dataOrigin:'supabase'};};
+  if(includeProduction){if(!productionReadPromise)productionReadPromise=load().finally(()=>{productionReadPromise=null;});return productionReadPromise;}
+  if(!readPromise)readPromise=load().finally(()=>{readPromise=null;});return readPromise;
  }
  async function download(object){const res=await request('file',{object});return {bytes:Buffer.from(await res.arrayBuffer()),type:res.headers.get('content-type')};}
  async function login(email,password){return (await(await request('login',{method:'POST',body:JSON.stringify({email,password})})).json()).user;}

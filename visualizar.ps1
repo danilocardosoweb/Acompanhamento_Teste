@@ -32,9 +32,8 @@ try {
 }
 foreach($s in $sheets) {
   & $renderer -png -r 140 (Join-Path $Destination $s.file) (Join-Path $Destination $s.prefix) 2>$null
-  if($LASTEXITCODE -ne 0) {throw "Nao foi possivel renderizar $($s.name)."}
   $s.pages=@(Get-ChildItem -LiteralPath $Destination -Filter "$($s.prefix)-*.png" | Sort-Object { [int]($_.BaseName -replace '^.*-','') } | ForEach-Object {$_.Name})
-  if($s.pages.Count -eq 0) {throw 'A visualizacao nao gerou paginas.'}
+  if($s.pages.Count -eq 0) {throw "Nao foi possivel renderizar $($s.name)."}
   $s.Remove('prefix')
 }
 $manifest=@{sheets=@($sheets); generatedAt=(Get-Date).ToString('o')}

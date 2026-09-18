@@ -1,7 +1,7 @@
 const viewer=document.createElement('dialog');
 viewer.className='viewer';
 viewer.setAttribute('aria-label','Visualizar documento');
-viewer.innerHTML=`<div class="viewer-head"><div><strong id="viewer-title"></strong><p>Visualização do relatório · Arquivo original preservado</p></div><div class="viewer-head-actions"><a id="viewer-download">↓ Baixar original</a><button id="viewer-close" aria-label="Fechar visualização">✕ Fechar</button></div></div><div id="viewer-tools"><div id="sheet-tabs" role="tablist" aria-label="Abas da planilha"></div><div class="zoom-tools"><button id="zoom-out" aria-label="Diminuir zoom">−</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Aumentar zoom">+</button><button id="zoom-fit">Ajustar</button><a id="sheet-pdf" target="_blank" rel="noopener">Abrir PDF</a></div></div><div id="viewer-pages" role="tabpanel" tabindex="0"></div>`;
+viewer.innerHTML=`<div class="viewer-head"><div><strong id="viewer-title"></strong><p>Visualização dentro do painel · Arquivo original preservado</p></div><div class="viewer-head-actions"><a id="viewer-open" target="_blank" rel="noopener" hidden>↗ Abrir em nova guia</a><a id="viewer-download">↓ Baixar original</a><button id="viewer-close" aria-label="Fechar visualização">✕ Fechar</button></div></div><div id="viewer-tools"><div id="sheet-tabs" role="tablist" aria-label="Abas da planilha"></div><div class="zoom-tools"><button id="zoom-out" aria-label="Diminuir zoom">−</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Aumentar zoom">+</button><button id="zoom-fit">Ajustar</button></div></div><div id="viewer-pages" role="tabpanel" tabindex="0"></div>`;
 document.body.appendChild(viewer);
 let previewRequest=0, previewData=null, previewSheet=0, previewZoom=100, trigger=null;
 const ve=id=>document.getElementById(id);
@@ -18,13 +18,16 @@ function showSheet(index){
  ve('sheet-tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>showSheet(Number(b.dataset.sheet)));
  ve('viewer-pages').setAttribute('aria-label',sheet.name);
  ve('viewer-pages').innerHTML=sheet.pages.map((page,i)=>`<figure><figcaption>${esc(sheet.name)} · Página ${i+1} de ${sheet.pages.length}</figcaption><img src="/preview/${previewData.key}/${encodeURIComponent(page)}" alt="${esc(sheet.name)} — página ${i+1}"></figure>`).join('');
- ve('sheet-pdf').href=`/preview/${previewData.key}/${encodeURIComponent(sheet.file)}`;
+ ve('viewer-open').href=`/preview/${previewData.key}/${encodeURIComponent(sheet.file)}`;
+ ve('viewer-open').hidden=false;
  ve('viewer-pages').scrollTop=0;
  setPreviewZoom(100);
 }
 function showDirectPdf(button){
  ve('viewer-tools').hidden=true;
- const url=`/attachment?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}&mode=inline`;
+ const endpoint=button.dataset.kind==='correction'?'/correction-file':'/attachment',url=`${endpoint}?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}&mode=inline`;
+ ve('viewer-open').href=url;
+ ve('viewer-open').hidden=false;
  ve('viewer-pages').innerHTML=`<iframe class="direct-pdf-viewer" src="${url}" title="${esc(button.dataset.name)}"></iframe>`;
 }
 document.addEventListener('click',async event=>{
@@ -32,7 +35,9 @@ document.addEventListener('click',async event=>{
  if(!button)return;
  trigger=button; const request=++previewRequest;
  ve('viewer-title').textContent=button.dataset.name;
- ve('viewer-download').href=button.dataset.kind==='correction'?`/correction-file?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}&mode=download`:`/attachment?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}`;
+ const endpoint=button.dataset.kind==='correction'?'/correction-file':'/attachment';
+ ve('viewer-download').href=`${endpoint}?id=${encodeURIComponent(button.dataset.id)}&index=${button.dataset.index}&mode=download`;
+ ve('viewer-open').hidden=true;
  ve('viewer-tools').hidden=true;
  ve('viewer-pages').innerHTML='<div class="preview-loading" role="status">Preparando as páginas do documento…<p>A primeira abertura pode levar alguns segundos.</p></div>';
  viewer.showModal();

@@ -28,6 +28,7 @@ function attachment(url) {
 }
 function renderPreview(item,source) {
   if(!/\.(xlsx|xls|xlsm|xlsb|pdf)$/i.test(source)) throw new Error('Visualização não disponível para este formato.');
+  if(path.extname(source).toLowerCase()==='.pdf')return Promise.resolve({directPdf:true,name:item.name});
   const key=crypto.createHash('sha256').update('preview-v1').update(fs.readFileSync(source)).digest('hex');
   const dir=path.join(root,'previews',key), manifest=path.join(dir,'manifest.json');
   const result=()=>({...JSON.parse(fs.readFileSync(manifest,'utf8')),key,name:item.name});
@@ -83,7 +84,7 @@ const server = http.createServer((req,res) => {
     if(url.pathname === '/api/logout') {const token=cookies(req).quality_session;if(token)sessions.delete(token);res.setHeader('Set-Cookie','quality_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return json(res,200,{ok:true});}
     if(url.pathname === '/api/correction') {const user=authenticated(req);if(!user)return json(res,401,{error:'Faça login para registrar a correção.'});readBody(req,36*1024*1024).then(async body=>{try{const input=JSON.parse(body),locations=Array.isArray(input.locations)?input.locations.slice(0,50):input.location?[input.location]:[];if(!/^[0-9a-f-]{36}$/.test(String(input.id||''))||String(input.text||'').length>10000)throw Error('Dados inválidos.');for(const location of locations)await validateLocation(input.id,location);await cloud.saveCorrection({id:input.id,text:String(input.text||''),user,file:correctionFile(input.file)});for(const location of locations)await cloud.saveLocation({location,correctionId:input.id,user});const confirmed=await cloud.read(),saved=((confirmed.productionNotes||confirmed.corrections||[]).find(c=>c.id===input.id)?.locations||[]),savedIds=new Set(saved.map(l=>l.id));for(const location of locations){if(location.remove?savedIds.has(location.id):!savedIds.has(location.id))throw Error('O banco não confirmou a gravação das marcações.');}json(res,200,{ok:true,locations:saved.length,confirmed:true});}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
     if(url.pathname === '/api/tool-drawing') {const user=authenticated(req);if(!user)return json(res,401,{error:'Faça login para associar o desenho.'});readBody(req,14*1024*1024).then(async body=>{try{const input=JSON.parse(body),file=drawingFile(input.file),tool=String(input.tool||'').trim().toUpperCase(),sequence=Number(input.sequence);if(!tool||!Number.isInteger(sequence)||sequence<1)throw Error('Ferramenta e sequência inválidas.');const result=await cloud.saveToolDrawing({id:crypto.randomUUID(),tool,sequence,name:file.name,bytes:file.bytes,user});json(res,200,{ok:true,...result});}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
-    if(url.pathname === '/api/import-corrections') {const user=authenticated(req);if(!user)return json(res,401,{error:'Faça login para importar produção.'});readBody(req,16*1024*1024).then(async body=>{try{const input=JSON.parse(body),bytes=Buffer.from(String(input.data||''),'base64');if(!bytes.length||bytes.length>10*1024*1024||bytes[0]!==80||bytes[1]!==75)throw Error('Selecione um arquivo Excel .xlsx de até 10 MB.');const result=await parseCorrections(bytes,await cloud.read());if(input.confirm){const all=result.rows.filter(row=>row.status==='matched'||row.status==='new'),production=result.kind==='production',offset=Math.max(0,Number(input.offset)||0),limit=Math.min(50,Math.max(1,Number(input.limit)||25)),rows=production?all.slice(offset,offset+limit):all;await (production?cloud.importProduction(rows,user):cloud.importCorrections(rows,user));result.imported=rows.length;result.totalImportable=all.length;result.nextOffset=production?offset+rows.length:all.length;result.complete=!production||result.nextOffset>=all.length;}json(res,200,result);}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
+    if(url.pathname === '/api/import-corrections') {const user=authenticated(req);if(!user)return json(res,401,{error:'Faça login para importar a planilha.'});readBody(req,16*1024*1024).then(async body=>{try{const input=JSON.parse(body),bytes=Buffer.from(String(input.data||''),'base64');if(!bytes.length||bytes.length>10*1024*1024||bytes[0]!==80||bytes[1]!==75)throw Error('Selecione um arquivo Excel .xlsx de até 10 MB.');const result=await parseCorrections(bytes,await cloud.read(true));if(input.expectedKind&&result.kind!==input.expectedKind)throw Error(input.expectedKind==='correction'?'Esta planilha não possui a coluna Correção Efetuada. Selecione a planilha de correções executadas.':'Esta planilha contém correções. Use o botão Importar correções na tela de Apontamentos.');if(input.confirm){const all=result.rows.filter(row=>row.status==='matched'||row.status==='new'),production=result.kind==='production',offset=Math.max(0,Number(input.offset)||0),limit=Math.min(50,Math.max(1,Number(input.limit)||25)),rows=production?all.slice(offset,offset+limit):all;await (production?cloud.importProduction(rows,user):cloud.importCorrections(rows,user));result.imported=rows.length;result.totalImportable=all.length;result.nextOffset=production?offset+rows.length:all.length;result.complete=!production||result.nextOffset>=all.length;}json(res,200,result);}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
     if(url.pathname === '/api/sync') {if(!authenticated(req))return json(res,401,{error:'Faça login para atualizar os e-mails.'});sync();return json(res,202,{syncing});}
     if(url.pathname === '/api/preview') {
       try {(url.searchParams.get('kind')==='correction'?correctionPreview(url):preview(url)).then(result=>json(res,200,result)).catch(e=>json(res,500,{error:e.message}));}catch(e){json(res,400,{error:e.message});}
@@ -94,8 +95,9 @@ const server = http.createServer((req,res) => {
   if(req.method !== 'GET') return json(res,405,{});
   if(url.pathname === '/api/auth') return json(res,200,{user:authenticated(req)});
   if(url.pathname === '/api/status') return json(res,200,{syncing,error,lastRun,cloud:cloud.status()});
+  if(url.pathname === '/whatsapp-qr') {const qrFile=path.join(root,'whatsapp-bot','whatsapp-qr.png');if(!fs.existsSync(qrFile))return json(res,404,{error:'QR Code indisponível.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store'});return fs.createReadStream(qrFile).pipe(res);}
   if(url.pathname === '/api/data') {
-    if(cloud.enabled()) {cloud.read().then(data=>json(res,200,data)).catch(e=>json(res,503,{records:[],warnings:[e.message]}));return;}
+    if(cloud.enabled()) {cloud.read(url.searchParams.get('includeProduction')==='1').then(data=>json(res,200,data)).catch(e=>json(res,503,{records:[],warnings:[e.message]}));return;}
     try {return json(res,200,{...JSON.parse(fs.readFileSync(path.join(root,'dados/testes.json'),'utf8')),dataOrigin:'local'});} catch {return json(res,200,{records:[],warnings:[]});}
   }
   if(url.pathname === '/tool-drawing') {if(!authenticated(req))return json(res,401,{error:'Faça login para visualizar o desenho.'});cloud.read().then(all=>{const drawing=(all.toolDrawings||[]).find(d=>d.id===url.searchParams.get('id'));if(!drawing?.objectPath)throw Error('Desenho não encontrado.');return cloud.download(drawing.objectPath);}).then(({bytes,type})=>{res.writeHead(200,{'Content-Type':type||'application/pdf','Content-Disposition':'inline','X-Content-Type-Options':'nosniff','Cache-Control':'private, max-age=60'});res.end(bytes);}).catch(e=>json(res,404,{error:e.message}));return;}
@@ -108,11 +110,13 @@ const server = http.createServer((req,res) => {
       cloud.download(object).then(({bytes,type})=>{res.writeHead(200,{'Content-Type':type||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'private, max-age=60'});res.end(bytes);}).catch(()=>json(res,404,{}));return;
     }
   } else if (url.pathname === '/attachment') {
+    const wantsInline=url.searchParams.get('mode')==='inline';
     if(cloud.enabled()) {
       try{
         const a=cloud.findFile(url.searchParams.get('id'),Number(url.searchParams.get('index')));
         if(!a?.cloudPath)return json(res,404,{error:'Arquivo não encontrado.'});
-        cloud.download(a.cloudPath).then(({bytes,type})=>{res.writeHead(200,{'Content-Type':type||'application/octet-stream','Content-Disposition':`attachment; filename*=UTF-8''${encodeURIComponent(a.name)}`,'X-Content-Type-Options':'nosniff','Cache-Control':'private, no-store'});res.end(bytes);}).catch(()=>json(res,404,{}));return;
+        const inline=wantsInline&&(/\.pdf$/i.test(a.name)||/^application\/pdf$/i.test(a.mimeType||''));
+        cloud.download(a.cloudPath).then(({bytes,type})=>{res.writeHead(200,{'Content-Type':type||a.mimeType||(/\.pdf$/i.test(a.name)?'application/pdf':'application/octet-stream'),'Content-Disposition':`${inline?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(a.name)}`,'X-Content-Type-Options':'nosniff','Cache-Control':'private, no-store'});res.end(bytes);}).catch(()=>json(res,404,{}));return;
       }catch{return json(res,404,{});}
     }
     try {
@@ -122,7 +126,8 @@ const server = http.createServer((req,res) => {
       if(!a) return json(res,404,{error:'Arquivo nao encontrado.'});
       file=path.resolve(root,a.path);
       if(!file.startsWith(path.join(root,'anexos')+path.sep)) return json(res,403,{});
-      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(a.name)}`);
+      const inline=wantsInline&&/\.pdf$/i.test(a.name);
+      res.setHeader('Content-Disposition', `${inline?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(a.name)}`);
     } catch {return json(res,404,{});}
   } else if (url.pathname === '/correction-file') {
     if(!cloud.enabled())return json(res,503,{error:'Serviço de dados não configurado.'});
@@ -137,7 +142,7 @@ const server = http.createServer((req,res) => {
     if(!files[url.pathname]) return json(res,404,{});
     file=path.join(root,files[url.pathname]);
   }
-  const type={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.pdf':'application/pdf','.png':'image/png'}[path.extname(file).toLowerCase()] || 'application/octet-stream';
+  const type={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.pdf':'application/pdf','.png':'image/png'}[path.extname(file).toLowerCase()] || 'application/octet-stream';
   fs.readFile(file,(err,buf)=>{if(err)return json(res,404,{});res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(buf);});
 });
 server.on('error',e=>{if(e.code==='EADDRINUSE')process.exit(0);console.error(e);process.exit(1);});

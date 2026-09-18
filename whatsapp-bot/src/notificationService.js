@@ -3,7 +3,7 @@ const log=require('./logger');
 function createNotificationService(supabase,client){
  const workerId=process.env.WORKER_ID||'quality-whatsapp-windows';
  async function recover(){const {error}=await supabase.rpc('quality_whatsapp_recover_stale',{p_age_minutes:15});if(error)throw error;}
- async function process(){
+ async function processQueue(){
   const {data:rows,error}=await supabase.rpc('quality_whatsapp_claim_pending',{p_worker_id:workerId,p_limit:10});if(error)throw error;
   for(const row of rows||[]){
    try{
@@ -17,6 +17,6 @@ function createNotificationService(supabase,client){
    }
   }
  }
- return {recover,process};
+ return {recover,process:processQueue};
 }
 module.exports={createNotificationService};
