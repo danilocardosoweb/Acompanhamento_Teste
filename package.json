@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Painel local para acompanhar testes e correções de ferramentas da Tecnoperfil.",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node draw2data/lab-engine.test.cjs"
   },
   "repository": {
     "type": "git",

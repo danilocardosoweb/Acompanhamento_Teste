@@ -1,7 +1,23 @@
 const {extractPdf}=require('./reader.cjs');
 const {analyze}=require('./detection.cjs');
 const {extractVisualDimensions}=require('./ocr.cjs');
+const {extractLabDimensions}=require('./lab-engine.cjs');
 let busy=false;
+
+function reliableFallback(item){
+ const nominal=Number(item.nominal),plus=item.tolerancePlus==null?null:Number(item.tolerancePlus),minus=item.toleranceMinus==null?null:Number(item.toleranceMinus);
+ if(!Number.isFinite(nominal)||nominal<0)return false;
+ if(plus!==null||minus!==null)return Number.isFinite(plus)&&Number.isFinite(minus)&&plus>=0&&minus>=0&&plus<nominal&&minus<nominal;
+ return Number(item.confidence||0)>=.45;
+}
+function mergeDimensions(primary,fallback){
+ const merged=[...primary];
+ for(const candidate of fallback.filter(reliableFallback)){
+  const duplicate=merged.some(current=>current.page===candidate.page&&Math.hypot((current.x||0)-(candidate.x||0),(current.y||0)-(candidate.y||0))<9);
+  if(!duplicate)merged.push(candidate);
+ }
+ return merged;
+}
 function normalizeDimension(item){
  const nominal=Number(item.nominal),plus=item.tolerancePlus==null||item.tolerancePlus===''?null:Number(item.tolerancePlus),minus=item.toleranceMinus==null||item.toleranceMinus===''?null:Number(item.toleranceMinus);
  if(!Number.isFinite(nominal)||nominal<0)return null;
@@ -24,14 +40,23 @@ async function processDrawing(fileName,bytes){
  busy=true;
  try{
   const pdf=await extractPdf(bytes),result=analyze({fileName,pdf});
-  if(!result.dimensions.length){
-   result.dimensions=await extractVisualDimensions(bytes);result.method='OCR';
-   result.warnings=result.dimensions.length?['As cotas foram lidas visualmente. Confira o desenho; campos sem leitura segura ficam em branco.']:['Nem a leitura de texto nem o OCR identificaram cotas seguras. Confira o desenho original.'];
+  const vector=result.dimensions;
+  const laboratory=await extractLabDimensions(bytes);
+  if(laboratory.length){
+   // Vector text is precise when it exists. The laboratory layer adds cotas
+   // converted to curves and filters the visual candidates by their geometry.
+   result.dimensions=mergeDimensions(laboratory,vector);result.method=vector.length?'HYBRID_LAB':'OCR_LAB';
+   result.warnings=['Leitura experimental: o motor separou cotas da geometria e agrupou tolerâncias pela posição. Confira os itens em revisão antes de salvar o perfil.'];
+  }else if(!vector.length){
+   // The previous OCR is retained only as a controlled fallback while the
+   // laboratory engine is being benchmarked against real production drawings.
+   result.dimensions=await extractVisualDimensions(bytes);result.method=result.dimensions.length?'OCR_LEGACY':'OCR';
+   result.warnings=result.dimensions.length?['Leitura de contingência: confira os itens em revisão antes de salvar o perfil.']:['Nem a leitura de texto nem a leitura experimental identificaram cotas seguras. Confira o desenho original.'];
   }
   const checked=validateDimensions(result.dimensions);result.dimensions=checked.accepted;
   result.diagnostics={...(result.diagnostics||{}),discardedDimensions:checked.discarded.length,reviewDimensions:result.dimensions.filter(item=>item.status==='REVISAR').length};
   if(checked.discarded.length)result.warnings=[...(result.warnings||[]),`${checked.discarded.length} resultado(s) duplicado(s) ou inválido(s) foram removido(s).`];
-  result.engineVersion='2.0-visual';return result;
+  result.engineVersion='3.0-spatial-lab';return result;
  }finally{busy=false;}
 }
 module.exports={processDrawing};
