@@ -4,11 +4,11 @@
     "api/index.cjs": { "maxDuration": 300 }
   },
   "routes": [
-    { "src": "/api/.*", "dest": "/api/index.cjs" },
-    { "src": "/attachment", "dest": "/api/index.cjs" },
-    { "src": "/correction-file", "dest": "/api/index.cjs" },
-    { "src": "/tool-drawing", "dest": "/api/index.cjs" },
-    { "src": "/preview/.*", "dest": "/api/index.cjs" },
+    { "src": "/api/.*", "dest": "/api/index" },
+    { "src": "/attachment", "dest": "/api/index" },
+    { "src": "/correction-file", "dest": "/api/index" },
+    { "src": "/tool-drawing", "dest": "/api/index" },
+    { "src": "/preview/.*", "dest": "/api/index" },
     { "handle": "filesystem" },
     { "src": "/.*", "dest": "/index.html" }
   ]
