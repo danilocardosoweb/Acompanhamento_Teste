@@ -1,9 +1,7 @@
-const path=require('path');
-let pdfModule;
-async function loadPdf(){return pdfModule||(pdfModule=import('pdfjs-dist/legacy/build/pdf.mjs'));}
+const {loadPdfJs}=require('./pdfjs.cjs');
 async function extractPdf(buffer){
  if(!Buffer.isBuffer(buffer)||buffer.subarray(0,5).toString()!=='%PDF-')throw Error('Selecione um arquivo PDF válido.');
- const pdfjs=await loadPdf(),document=await pdfjs.getDocument({data:new Uint8Array(buffer),disableWorker:true,useSystemFonts:true}).promise;
+ const pdfjs=await loadPdfJs(),document=await pdfjs.getDocument({data:new Uint8Array(buffer),disableWorker:true,useSystemFonts:true}).promise;
  const pages=[];let fullText='';
  try{
   for(let pageNumber=1;pageNumber<=document.numPages;pageNumber++){

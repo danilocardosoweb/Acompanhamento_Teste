@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { createWorker } = require('tesseract.js');
+const { loadPdfJs } = require('./pdfjs.cjs');
 
 const SCALE = 5;
 const MAX_PAGES = 10;
@@ -301,7 +302,7 @@ function distinct(candidates) {
 }
 
 async function extractLabDimensions(buffer) {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjs = await loadPdfJs();
   const document = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
   // Vercel's deployed bundle is read-only. Its temporary directory is writable
   // for the lifetime of the function and lets Tesseract reuse the language data.

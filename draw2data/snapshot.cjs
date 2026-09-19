@@ -1,5 +1,7 @@
+const { loadPdfJs } = require('./pdfjs.cjs');
+
 async function renderDimensionSnapshot(bytes, dimension) {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjs = await loadPdfJs();
   const pageNumber = Math.round(Number(dimension?.page));
   const x = Number(dimension?.x), y = Number(dimension?.y), width = Number(dimension?.width), height = Number(dimension?.height);
   if (!Number.isInteger(pageNumber) || pageNumber < 1 || ![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0) {
