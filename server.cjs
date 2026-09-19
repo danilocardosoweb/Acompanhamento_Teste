@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const {parseCorrections}=require('./importer.cjs');
 const {processDrawing}=require('./draw2data/processing.cjs');
 const {exportWorkbook}=require('./draw2data/exporter.cjs');
-const root = __dirname, port = 4317;
+const root = __dirname, port = Number(process.env.PORT || 4317);
 const cloud = require('./cloud.cjs')(root);
 let syncing = false, error = '', lastRun = '';
 let previewQueue=Promise.resolve();
