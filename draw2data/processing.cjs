@@ -35,28 +35,36 @@ function validateDimensions(dimensions){
  }
  return {accepted,discarded};
 }
-async function processDrawing(fileName,bytes){
+function drawingOptions(input={}){return {mode:input.mode==='vector'?'vector':'complete',maxPages:Math.max(1,Math.min(10,Number(input.maxPages)||10)),includePlain:input.includePlain!==false,minConfidence:Math.max(0,Math.min(.95,Number(input.minConfidence)||0))};}
+async function processDrawing(fileName,bytes,inputOptions={}){
  if(busy)throw Error('Uma análise já está em andamento. Aguarde a conclusão.');
- busy=true;
+ busy=true;const options=drawingOptions(inputOptions);
  try{
-  const pdf=await extractPdf(bytes),result=analyze({fileName,pdf});
+  const pdf=await extractPdf(bytes,options),result=analyze({fileName,pdf});
   const vector=result.dimensions;
-  const laboratory=await extractLabDimensions(bytes);
+  const laboratory=options.mode==='vector'?[]:await extractLabDimensions(bytes,options);
   if(laboratory.length){
    // Vector text is precise when it exists. The laboratory layer adds cotas
    // converted to curves and filters the visual candidates by their geometry.
    result.dimensions=mergeDimensions(laboratory,vector);result.method=vector.length?'HYBRID_LAB':'OCR_LAB';
    result.warnings=['Leitura experimental: o motor separou cotas da geometria e agrupou tolerâncias pela posição. Confira os itens em revisão antes de salvar o perfil.'];
-  }else if(!vector.length){
+  }else if(!vector.length&&options.mode!=='vector'){
    // The previous OCR is retained only as a controlled fallback while the
    // laboratory engine is being benchmarked against real production drawings.
    result.dimensions=await extractVisualDimensions(bytes);result.method=result.dimensions.length?'OCR_LEGACY':'OCR';
    result.warnings=result.dimensions.length?['Leitura de contingência: confira os itens em revisão antes de salvar o perfil.']:['Nem a leitura de texto nem a leitura experimental identificaram cotas seguras. Confira o desenho original.'];
   }
-  const checked=validateDimensions(result.dimensions);result.dimensions=checked.accepted;
+  if(options.mode==='vector'){
+   result.method='VETORIAL';result.warnings=['Leitura somente do texto pesquisável do PDF. Use a leitura completa para desenhos digitalizados ou cotas convertidas em curvas.'];
+  }
+  const checked=validateDimensions(result.dimensions);result.dimensions=checked.accepted.filter(item=>(options.includePlain||item.tolerancePlus!==null||item.toleranceMinus!==null)&&Number(item.confidence||0)>=options.minConfidence);
   result.diagnostics={...(result.diagnostics||{}),discardedDimensions:checked.discarded.length,reviewDimensions:result.dimensions.filter(item=>item.status==='REVISAR').length};
+  if(pdf.truncated)result.warnings=[...(result.warnings||[]),`Foram analisadas as primeiras ${pdf.pageCount} de ${pdf.sourcePageCount} página(s), conforme a configuração.`];
+  if(!options.includePlain)result.warnings=[...(result.warnings||[]),'Cotas sem tolerância explícita foram ocultadas conforme a configuração.'];
+  if(options.minConfidence>0)result.warnings=[...(result.warnings||[]),`Leituras com confiança abaixo de ${Math.round(options.minConfidence*100)}% foram ocultadas conforme a configuração.`];
+  result.settings=options;
   if(checked.discarded.length)result.warnings=[...(result.warnings||[]),`${checked.discarded.length} resultado(s) duplicado(s) ou inválido(s) foram removido(s).`];
   result.engineVersion='3.0-spatial-lab';return result;
  }finally{busy=false;}
 }
-module.exports={processDrawing};
+module.exports={processDrawing,drawingOptions};

@@ -301,7 +301,7 @@ function distinct(candidates) {
   return accepted.sort((a, b) => a.page - b.page || b.y - a.y || a.x - b.x);
 }
 
-async function extractLabDimensions(buffer) {
+async function extractLabDimensions(buffer, options = {}) {
   const pdfjs = await loadPdfJs();
   const document = await pdfjs.getDocument({ data: new Uint8Array(buffer), disableWorker: true, useSystemFonts: true }).promise;
   // Vercel's deployed bundle is read-only. Its temporary directory is writable
@@ -311,9 +311,9 @@ async function extractLabDimensions(buffer) {
   let worker;
   const all = [];
   try {
-    if (document.numPages > MAX_PAGES) throw Error('Separe o desenho em arquivos de até 10 páginas para a leitura experimental.');
+    const maxPages = Math.min(document.numPages, Math.max(1, Math.min(MAX_PAGES, Number(options.maxPages) || MAX_PAGES)));
     worker = await createWorker('eng', 1, { cachePath });
-    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
       const page = await document.getPage(pageNumber);
       const viewport = page.getViewport({ scale: SCALE });
       if (viewport.width * viewport.height > 32000000) throw Error('Página grande demais para a leitura experimental.');
