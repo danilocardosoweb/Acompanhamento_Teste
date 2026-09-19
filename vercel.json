@@ -1,9 +1,18 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/[...path].js": { "maxDuration": 300 }
-  },
+  "builds": [
+    { "src": "api/index.cjs", "use": "@vercel/node" },
+    { "src": "index.html", "use": "@vercel/static" },
+    { "src": "*.js", "use": "@vercel/static" },
+    { "src": "*.css", "use": "@vercel/static" },
+    { "src": "vendor/**", "use": "@vercel/static" }
+  ],
   "routes": [
+    { "src": "/api/.*", "dest": "/api/index.cjs" },
+    { "src": "/attachment", "dest": "/api/index.cjs" },
+    { "src": "/correction-file", "dest": "/api/index.cjs" },
+    { "src": "/tool-drawing", "dest": "/api/index.cjs" },
+    { "src": "/preview/.*", "dest": "/api/index.cjs" },
     { "handle": "filesystem" },
     { "src": "/.*", "dest": "/index.html" }
   ]
