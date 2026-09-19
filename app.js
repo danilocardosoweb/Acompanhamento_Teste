@@ -43,7 +43,7 @@ function renderSettings(){
 }
 function openPage(page){
  document.querySelectorAll('.nav-button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
- ['tracking','corrections','fep','indicators','settings'].forEach(name=>$(name+'-page').hidden=name!==page);
+ ['tracking','corrections','fep','draw2data','indicators','settings','controle'].forEach(name=>{const el=$(name+'-page');if(el)el.hidden=name!==page;});
  if(page==='corrections'||page==='indicators'){
   const target=page==='corrections'?'corrections-list':'indicator-kpis';
   $(target).innerHTML='<div class="empty">Carregando dados de produção…</div>';
@@ -51,10 +51,12 @@ function openPage(page){
  }
  if(page==='fep')window.renderFep?.();
  if(page==='settings')renderSettings();
+ if(page==='controle')window.renderControle?.();
 }
 window.openPage=openPage;
 document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>openPage(button.dataset.page)));
 function renderAuth(){const signed=!!authUser;$('auth-user').hidden=!signed;$('logout').hidden=!signed;$('auth-user').textContent=signed?authUser.name||authUser.email:'';$('sync').hidden=signed;$('sync').textContent='Entrar';renderSettings();}
+if(!window.__controleModule){window.__controleModule=true;const script=document.createElement('script');script.src='/controle.js?v=20260918-1';document.body.append(script);}
 function groups(){const map=new Map();for(const r of data.records){const key=r.tool||'Código não identificado';if(!map.has(key))map.set(key,[]);map.get(key).push(r);}for(const rows of map.values())rows.sort((a,b)=>sortDate(b).localeCompare(sortDate(a))||b.received.localeCompare(a.received));return map;}
 function latest(rows){const map=new Map();for(const r of rows){if(!map.has(r.sequence))map.set(r.sequence,r);}return [...map.values()];}
 function badge(s){return `<span class="badge ${esc(s)}">${esc(s)}</span>`;}

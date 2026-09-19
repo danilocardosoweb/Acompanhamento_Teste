@@ -15,3 +15,8 @@ whatsapp-bot/whatsapp-summary-command-*.json
 whatsapp-bot/whatsapp-summary-result-*.json
 .agents/
 .ui-backup/
+.draw2data-cache/
+draw2data-results/
+tmp/draw2data/
+dados/controle-dimensional.json
+dados/controle-desenhos/
