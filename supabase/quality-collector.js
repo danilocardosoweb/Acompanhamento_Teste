@@ -11,9 +11,22 @@ async function api(route,options={}) {
  return response;
 }
 const hash=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
-const validPath=p=>/^originals\/[a-f0-9]{64}\.(xlsx|xls|xlsm|xlsb|csv|pdf)$/.test(p)||/^previews\/[a-f0-9]{64}\/sheet-\d+(?:-\d+)?\.(png|pdf)$/.test(p)||/^corrections\/[0-9a-f-]{36}\/[a-zA-Z0-9._-]+$/.test(p)||/^drawings\/[0-9a-f-]{36}\/[a-zA-Z0-9._-]+\.pdf$/.test(p);
+const validPath=p=>/^originals\/[a-f0-9]{64}\.(xlsx|xls|xlsm|xlsb|csv|pdf)$/.test(p)||/^previews\/[a-f0-9]{64}\/sheet-\d+(?:-\d+)?\.(png|pdf)$/.test(p)||/^corrections\/[0-9a-f-]{36}\/[a-zA-Z0-9._-]+$/.test(p)||/^drawings\/[0-9a-f-]{36}\/[a-zA-Z0-9._-]+\.pdf$/.test(p)||/^control-drawings\/[0-9a-f-]{36}\.pdf$/.test(p)||/^control-evidence\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png|webp)$/.test(p);
 async function upsert(table,body){return api(`/rest/v1/${table}?on_conflict=id`,{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'},body:JSON.stringify(body)});}
 const whatsappTitle={novo_teste:'Novo teste realizado',ferramenta_aprovada:'Ferramenta aprovada',ferramenta_reprovada:'Ferramenta reprovada',nova_correcao:'Nova correção cadastrada'};
+const uuid=value=>/^[0-9a-f-]{36}$/i.test(String(value||''));
+const cleanText=(value,max)=>String(value??'').trim().slice(0,max);
+function controlDimensions(value){
+ const rows=Array.isArray(value)?value:[];
+ if(!rows.length||rows.length>500)throw Error('O perfil precisa conter entre 1 e 500 cotas.');
+ return rows.map((item,index)=>{
+  const nominal=Number(item?.nominal),plus=item?.tolerancePlus==null||item.tolerancePlus===''?null:Number(item.tolerancePlus),minus=item?.toleranceMinus==null||item.toleranceMinus===''?null:Number(item.toleranceMinus);
+  if(!Number.isFinite(nominal)||nominal<0||nominal>100000||plus!==null&&(!Number.isFinite(plus)||plus<0||plus>100000)||minus!==null&&(!Number.isFinite(minus)||minus<0||minus>100000))throw Error(`Cota ${index+1} inválida.`);
+  return {...item,id:cleanText(item?.id||`${index+1}`,100),rawText:cleanText(item?.rawText||String(nominal),300),nominal,tolerancePlus:plus,toleranceMinus:minus};
+ });
+}
+const profileRow=row=>({id:row.id,tool:row.tool,sequence:row.sequence,revision:row.revision,name:row.name,dimensions:row.dimensions,drawingPath:row.drawing_path,active:row.active,createdAt:row.created_at,updatedAt:row.updated_at});
+const inspectionRow=(row,evidence=[])=>({id:row.id,profileId:row.profile_id,tool:row.tool,sequence:row.sequence,date:row.test_date,client:row.client,part:row.part,quantity:row.quantity,lot:row.lot,operator:row.operator,shift:row.shift,observations:row.observations,measurements:row.measurements,evidence:evidence.map(item=>({id:item.id,name:item.name,mimeType:item.mime_type,path:item.object_path,createdAt:item.created_at})),createdAt:row.created_at});
 async function enqueueWhatsapp(event){
  const enabled=await(await api(`/rest/v1/quality_whatsapp_event_settings?event_type=eq.${encodeURIComponent(event.type)}&enabled=eq.true&select=event_type`)).json();
  if(!enabled.length)return;
@@ -72,6 +85,63 @@ Deno.serve(async req=>{
    if(!/^[0-9a-f-]{36}$/.test(id))return respond({error:'Identificador do desenho inválido.'},400);
    await api('/rest/v1/quality_tool_drawings?on_conflict=id',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({id,tool,sequence,name:String(body.name).slice(0,255),object_path:objectPath,size_bytes:Number(body.size),uploaded_by:userId,updated_at:new Date().toISOString()})});
    return respond({ok:true,id});
+  }
+  if(action==='control-upload'&&req.method==='POST') {
+   const body=await req.json(),kind=String(body.kind||''),size=Number(body.size),mime=String(body.mimeType||'');
+   if(!Number.isInteger(size)||size<1||size>25*1024*1024)return respond({error:'Arquivo inválido.'},400);
+   let object;
+   if(kind==='drawing'){
+    if(mime!=='application/pdf')return respond({error:'Selecione um PDF válido.'},400);
+    object=`control-drawings/${crypto.randomUUID()}.pdf`;
+   }else if(kind==='evidence'){
+    const inspectionId=String(body.inspectionId||''),extension={ 'image/jpeg':'jpg','image/png':'png','image/webp':'webp' }[mime];
+    if(!uuid(inspectionId)||!extension||size>3*1024*1024)return respond({error:'Foto de evidência inválida.'},400);
+    object=`control-evidence/${inspectionId}/${crypto.randomUUID()}.${extension}`;
+   }else return respond({error:'Tipo de arquivo inválido.'},400);
+   const signed=await(await api(`/storage/v1/object/upload/sign/${bucket}/${object}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})})).json();
+   if(!signed.token)return respond({error:'Não foi possível preparar o envio do arquivo.'},500);
+   return respond({path:object,token:signed.token,uploadUrl:`${base}/storage/v1/object/upload/sign/${bucket}/${object}?token=${encodeURIComponent(signed.token)}`});
+  }
+  if(action==='control-profiles'&&req.method==='GET') {
+   const rows=await(await api('/rest/v1/quality_control_profiles?select=*&order=tool,sequence,revision')).json();
+   return respond(rows.map(profileRow));
+  }
+  if(action==='control-profiles'&&req.method==='POST') {
+   const body=await req.json(),id=String(body.id||crypto.randomUUID()),tool=cleanText(body.tool,80).toUpperCase(),sequence=body.sequence==null||body.sequence===''?null:Number(body.sequence),revision=cleanText(body.revision||'00',40),name=cleanText(body.name||`${tool} - Perfil dimensional`,200),drawingPath=body.drawingPath?String(body.drawingPath):null;
+   if(!uuid(id)||!tool||!name||(sequence!==null&&(!Number.isInteger(sequence)||sequence<1))||(drawingPath!==null&&(!validPath(drawingPath)||!drawingPath.startsWith('control-drawings/'))))return respond({error:'Dados do perfil inválidos.'},400);
+   const duplicate=await(await api(`/rest/v1/quality_control_profiles?tool=eq.${encodeURIComponent(tool)}&${sequence===null?'sequence=is.null':`sequence=eq.${sequence}`}&revision=eq.${encodeURIComponent(revision)}&select=id&limit=1`)).json();
+   if(duplicate.length)return respond({error:`Já existe o perfil ${tool} · Rev. ${revision}. Ajuste a revisão ou edite o perfil existente.`},409);
+   const row={id,tool,sequence,revision,name,dimensions:controlDimensions(body.dimensions),drawing_path:drawingPath,active:true,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+   await api('/rest/v1/quality_control_profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(row)});
+   return respond(profileRow(row),201);
+  }
+  if(action==='control-profiles-update'&&req.method==='POST') {
+   const body=await req.json(),id=String(body.id||'');if(!uuid(id))return respond({error:'Perfil inválido.'},400);
+   const found=await(await api(`/rest/v1/quality_control_profiles?id=eq.${id}&select=*&limit=1`)).json(),current=found[0];if(!current)return respond({error:'Perfil não encontrado.'},404);
+   const revision=body.revision===undefined?current.revision:cleanText(body.revision,40),name=body.name===undefined?current.name:cleanText(body.name,200),drawingPath=body.drawingPath===undefined?current.drawing_path:body.drawingPath?String(body.drawingPath):null;
+   if(!revision||!name||(drawingPath!==null&&(!validPath(drawingPath)||!drawingPath.startsWith('control-drawings/'))))return respond({error:'Dados do perfil inválidos.'},400);
+   const duplicate=await(await api(`/rest/v1/quality_control_profiles?tool=eq.${encodeURIComponent(current.tool)}&${current.sequence===null?'sequence=is.null':`sequence=eq.${current.sequence}`}&revision=eq.${encodeURIComponent(revision)}&id=neq.${id}&select=id&limit=1`)).json();
+   if(duplicate.length)return respond({error:`A revisão ${revision} já existe para esta ferramenta.`},409);
+   const row={...current,name,revision,drawing_path:drawingPath,updated_at:new Date().toISOString()};await api(`/rest/v1/quality_control_profiles?id=eq.${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,revision,drawing_path:drawingPath,updated_at:row.updated_at})});return respond(profileRow(row));
+  }
+  if(action==='control-profiles-delete'&&req.method==='POST') {
+   const body=await req.json(),id=String(body.id||'');if(!uuid(id))return respond({error:'Perfil inválido.'},400);
+   const usage=await(await api(`/rest/v1/quality_dimensional_inspections?profile_id=eq.${id}&select=id&limit=1`)).json();if(usage.length)return respond({error:'Este perfil possui inspeções registradas. Crie uma nova revisão ou arquive-o.'},409);
+   await api(`/rest/v1/quality_control_profiles?id=eq.${id}`,{method:'DELETE'});return respond({ok:true});
+  }
+  if(action==='inspections'&&req.method==='GET') {
+   const rows=await(await api('/rest/v1/quality_dimensional_inspections?select=*&order=created_at.desc&limit=100')).json(),ids=rows.map(row=>row.id),evidence=ids.length?await(await api(`/rest/v1/quality_dimensional_evidence?inspection_id=in.(${ids.join(',')})&select=*&order=created_at`)).json():[],byInspection=new Map();for(const item of evidence)(byInspection.get(item.inspection_id)||byInspection.set(item.inspection_id,[]).get(item.inspection_id)).push(item);return respond(rows.map(row=>inspectionRow(row,byInspection.get(row.id)||[])));
+  }
+  if(action==='inspections'&&req.method==='POST') {
+   const body=await req.json(),id=String(body.id||crypto.randomUUID()),profileId=String(body.profileId||''),measurements=Array.isArray(body.measurements)?body.measurements:[],evidence=Array.isArray(body.evidence)?body.evidence:[];
+   if(!uuid(id)||!uuid(profileId)||!measurements.length||measurements.length>500||evidence.length>4)return respond({error:'Dados da inspeção inválidos.'},400);
+   const profiles=await(await api(`/rest/v1/quality_control_profiles?id=eq.${profileId}&select=*&limit=1`)).json(),profile=profiles[0];if(!profile)return respond({error:'Perfil de controle não encontrado.'},404);
+   const date=/^\d{4}-\d{2}-\d{2}$/.test(String(body.date||''))?String(body.date):new Date().toISOString().slice(0,10);
+   const row={id,profile_id:profileId,tool:profile.tool,sequence:profile.sequence,test_date:date,client:cleanText(body.client,200),part:cleanText(body.part,200),quantity:Math.max(1,Math.min(100000,Number(body.quantity)||1)),lot:cleanText(body.lot,200),operator:cleanText(body.operator,200),shift:cleanText(body.shift,100),observations:cleanText(body.observations,10000),measurements,created_by:uuid(body.userId)?body.userId:null,created_by_name:cleanText(body.userName,200),created_at:new Date().toISOString()};
+   for(const item of evidence){if(!uuid(item?.id)||!validPath(item?.path)||!String(item.path).startsWith(`control-evidence/${id}/`)||!['image/jpeg','image/png','image/webp'].includes(item.mimeType)||!Number.isInteger(Number(item.size))||Number(item.size)<1||Number(item.size)>3*1024*1024)return respond({error:'Foto de evidência inválida.'},400);}
+   await api('/rest/v1/quality_dimensional_inspections',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(row)});
+   if(evidence.length)await api('/rest/v1/quality_dimensional_evidence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(evidence.map(item=>({id:item.id,inspection_id:id,name:cleanText(item.name,255),object_path:item.path,mime_type:item.mimeType,size_bytes:Number(item.size),created_at:row.created_at})))});
+   return respond(inspectionRow(row,evidence.map(item=>({id:item.id,name:item.name,mime_type:item.mimeType,object_path:item.path,created_at:row.created_at}))),201);
   }
   if(action==='location'&&req.method==='POST') {
    const body=await req.json(),id=String(body.id||''),correctionId=String(body.correctionId||''),userId=String(body.userId||'');

@@ -10,4 +10,5 @@ function buildWorkbook(analysis){
  sheet['!cols']=[{wch:18},{wch:32},{wch:9},{wch:18},{wch:16},{wch:14},{wch:14},{wch:12},{wch:12},{wch:12},{wch:18},{wch:14}];infoSheet['!cols']=[{wch:22},{wch:34},{wch:25},{wch:20},{wch:18},{wch:25}];XLSX.utils.book_append_sheet(workbook,sheet,'Cotas');XLSX.utils.book_append_sheet(workbook,infoSheet,'Informações');return workbook;
 }
 function exportWorkbook(analysis,folder){fs.mkdirSync(folder,{recursive:true});const filePath=uniquePath(folder,safeName(analysis.tool==='NAO_IDENTIFICADO'?`NAO_IDENTIFICADO_${path.parse(analysis.fileName).name}`:analysis.tool));const bytes=XLSX.write(buildWorkbook(analysis),{type:'buffer',bookType:'xlsx'});fs.writeFileSync(filePath,bytes);return {filePath,fileName:path.basename(filePath),bytes};}
-module.exports={buildWorkbook,exportWorkbook};
+function exportBytes(analysis){const name=safeName(analysis.tool==='NAO_IDENTIFICADO'?`NAO_IDENTIFICADO_${path.parse(analysis.fileName).name}`:analysis.tool);return {fileName:`${name}.xlsx`,bytes:XLSX.write(buildWorkbook(analysis),{type:'buffer',bookType:'xlsx'})};}
+module.exports={buildWorkbook,exportWorkbook,exportBytes};

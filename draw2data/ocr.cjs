@@ -1,5 +1,6 @@
 const fs=require('fs');
 const path=require('path');
+const os=require('os');
 const {createWorker}=require('tesseract.js');
 
 // These are measured pixel features, not substitutions of an OCR '+' for '±'.
@@ -45,7 +46,7 @@ function maskBlue(context){
 }
 async function extractVisualDimensions(buffer){
  const pdfjs=await import('pdfjs-dist/legacy/build/pdf.mjs');const task=pdfjs.getDocument({data:new Uint8Array(buffer)}),doc=await task.promise;
- const cache=path.join(__dirname,'..','.draw2data-cache');fs.mkdirSync(cache,{recursive:true});
+ const cache=process.env.VERCEL?path.join(os.tmpdir(),'draw2data-cache'):path.join(__dirname,'..','.draw2data-cache');fs.mkdirSync(cache,{recursive:true});
  let worker,legacy;const dimensions=[];
  try{
   if(doc.numPages>10)throw Error('Separe o desenho em arquivos de até 10 páginas para leitura visual.');

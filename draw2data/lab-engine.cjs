@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { createWorker } = require('tesseract.js');
 
 const SCALE = 5;
@@ -302,7 +303,9 @@ function distinct(candidates) {
 async function extractLabDimensions(buffer) {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const document = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
-  const cachePath = path.join(__dirname, '..', '.draw2data-cache', 'lab');
+  // Vercel's deployed bundle is read-only. Its temporary directory is writable
+  // for the lifetime of the function and lets Tesseract reuse the language data.
+  const cachePath = process.env.VERCEL ? path.join(os.tmpdir(), 'draw2data-cache', 'lab') : path.join(__dirname, '..', '.draw2data-cache', 'lab');
   fs.mkdirSync(cachePath, { recursive: true });
   let worker;
   const all = [];
