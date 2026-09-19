@@ -1,14 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
-    "api/index.js": { "maxDuration": 300 }
+    "api/[...path].js": { "maxDuration": 300 }
   },
   "routes": [
-    { "src": "/api/.*", "dest": "/api/index" },
-    { "src": "/attachment", "dest": "/api/index" },
-    { "src": "/correction-file", "dest": "/api/index" },
-    { "src": "/tool-drawing", "dest": "/api/index" },
-    { "src": "/preview/.*", "dest": "/api/index" },
     { "handle": "filesystem" },
     { "src": "/.*", "dest": "/index.html" }
   ]
