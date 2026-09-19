@@ -7,7 +7,7 @@ async function renderDimensionSnapshot(bytes, dimension) {
   if (!Number.isInteger(pageNumber) || pageNumber < 1 || ![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0) {
     throw Error('Esta cota não possui uma posição segura no desenho.');
   }
-  const document = await pdfjs.getDocument({ data: new Uint8Array(bytes) }).promise;
+  const document = await pdfjs.getDocument({ data: new Uint8Array(bytes), disableWorker: true, useSystemFonts: true }).promise;
   try {
     if (pageNumber > document.numPages) throw Error('Página da cota não encontrada no PDF.');
     const page = await document.getPage(pageNumber);

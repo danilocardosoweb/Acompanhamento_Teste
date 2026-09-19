@@ -303,7 +303,7 @@ function distinct(candidates) {
 
 async function extractLabDimensions(buffer) {
   const pdfjs = await loadPdfJs();
-  const document = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+  const document = await pdfjs.getDocument({ data: new Uint8Array(buffer), disableWorker: true, useSystemFonts: true }).promise;
   // Vercel's deployed bundle is read-only. Its temporary directory is writable
   // for the lifetime of the function and lets Tesseract reuse the language data.
   const cachePath = process.env.VERCEL ? path.join(os.tmpdir(), 'draw2data-cache', 'lab') : path.join(__dirname, '..', '.draw2data-cache', 'lab');
