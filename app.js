@@ -54,6 +54,7 @@ function openPage(page){
  if(page==='controle')window.renderControle?.();
 }
 window.openPage=openPage;
+document.addEventListener('click',event=>{if(event.target.closest('.nav-button[data-page="controle"]'))openPage('controle');});
 document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>openPage(button.dataset.page)));
 function renderAuth(){const signed=!!authUser;$('auth-user').hidden=!signed;$('logout').hidden=!signed;$('auth-user').textContent=signed?authUser.name||authUser.email:'';$('sync').hidden=signed;$('sync').textContent='Entrar';renderSettings();}
 if(!window.__controleModule){window.__controleModule=true;const script=document.createElement('script');script.src='/controle.js?v=20260919-3';document.body.append(script);}
