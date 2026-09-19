@@ -1,0 +1,1 @@
+import '../../quality-collector.js';
