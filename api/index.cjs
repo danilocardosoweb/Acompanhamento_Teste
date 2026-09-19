@@ -3,6 +3,7 @@ const {parseCorrections}=require('../importer.cjs');
 const {processDrawing}=require('../draw2data/processing.cjs');
 const {renderDimensionSnapshot}=require('../draw2data/snapshot.cjs');
 const {exportBytes}=require('../draw2data/exporter.cjs');
+const {loadPdfJs}=require('../draw2data/pdfjs.cjs');
 const endpoint=process.env.QUALITY_COLLECTOR_ENDPOINT,collectorToken=process.env.QUALITY_COLLECTOR_TOKEN,sessionSecret=process.env.QUALITY_SESSION_SECRET;
 function send(res,code,body,headers={}){res.statusCode=code;Object.entries(headers).forEach(([k,v])=>res.setHeader(k,v));if(Buffer.isBuffer(body))return res.end(body);res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','no-store');res.end(JSON.stringify(body));}
 function configured(){return endpoint&&collectorToken&&sessionSecret?.length>=32;}
@@ -23,6 +24,7 @@ module.exports=async(req,res)=>{try{const url=new URL(req.url,'https://app.local
  if(pathname==='/api/status')return send(res,200,{syncing:false,error:'',lastRun:'',canSync:false,cloud:{enabled:configured()}});
  if(pathname==='/api/data')return send(res,200,{...(await getData(url.searchParams.get('includeProduction')==='1')),dataOrigin:'cloud'});
  if(pathname==='/api/auth')return send(res,200,{user:auth(req)});
+ if(pathname==='/api/draw2data/health'&&req.method==='GET'){const pdfjs=await loadPdfJs();return send(res,200,{ready:typeof pdfjs.getDocument==='function',workerReady:typeof globalThis.pdfjsWorker?.WorkerMessageHandler==='function',domMatrixReady:typeof globalThis.DOMMatrix==='function'});}
  if(pathname==='/api/login'&&req.method==='POST'){const body=await input(req,8192),result=await(await collector('login',{method:'POST',body:JSON.stringify({email:body.email,password:body.password})})).json();res.setHeader('Set-Cookie',`quality_session=${sign(result.user)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800`);return send(res,200,{user:result.user});}
  if(pathname==='/api/logout'&&req.method==='POST'){res.setHeader('Set-Cookie','quality_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');return send(res,200,{ok:true});}
  if(pathname==='/api/draw2data/upload'&&req.method==='POST'){const user=auth(req);if(!user)return send(res,401,{error:'Faça login para analisar um desenho.'});const body=await input(req,8192),response=await collector('control-upload',{method:'POST',body:JSON.stringify({kind:'drawing',size:Number(body.size),mimeType:String(body.mimeType||'')})});return send(res,200,await response.json());}

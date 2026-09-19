@@ -1,4 +1,5 @@
 let pdfModule;
+let workerModule;
 
 function installPdfRuntime() {
   const canvas = require('@napi-rs/canvas');
@@ -10,6 +11,8 @@ function installPdfRuntime() {
 
 async function loadPdfJs() {
   installPdfRuntime();
+  workerModule ||= import('pdfjs-dist/legacy/build/pdf.worker.mjs');
+  await workerModule;
   return pdfModule || (pdfModule = import('pdfjs-dist/legacy/build/pdf.mjs'));
 }
 
