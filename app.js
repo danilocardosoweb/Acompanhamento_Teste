@@ -33,8 +33,16 @@ function setSidebar(collapsed){
 let savedSidebar=false;
 try{savedSidebar=localStorage.getItem('quality-sidebar')==='collapsed'}catch{}
 setSidebar(savedSidebar);
-$('sidebar-toggle').onclick=()=>setSidebar(!document.body.classList.contains('sidebar-collapsed'));
-const mobileMenu=$('mobile-menu-toggle');mobileMenu.onclick=()=>{const open=document.body.classList.toggle('menu-open');mobileMenu.setAttribute('aria-expanded',String(open));mobileMenu.setAttribute('aria-label',open?'Fechar menu':'Abrir menu');};document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>{document.body.classList.remove('menu-open');mobileMenu?.setAttribute('aria-expanded','false');mobileMenu?.setAttribute('aria-label','Abrir menu');}));
+const mobileMenu=$('mobile-menu-toggle'),sidebar=document.querySelector('aside');
+sidebar.id='app-sidebar';mobileMenu.setAttribute('aria-controls','app-sidebar');
+const mobileBackdrop=document.createElement('button');mobileBackdrop.type='button';mobileBackdrop.className='mobile-menu-backdrop';mobileBackdrop.setAttribute('aria-label','Fechar menu');mobileBackdrop.tabIndex=-1;sidebar.after(mobileBackdrop);
+function setMobileMenu(open,{restoreFocus=false}={}){document.body.classList.toggle('menu-open',open);mobileMenu.setAttribute('aria-expanded',String(open));mobileMenu.setAttribute('aria-label',open?'Fechar menu':'Abrir menu');mobileBackdrop.tabIndex=open?0:-1;if(open){requestAnimationFrame(()=>sidebar.querySelector('.nav-button.active')?.focus())}else if(restoreFocus){mobileMenu.focus()}}
+$('sidebar-toggle').onclick=()=>window.matchMedia('(max-width:820px)').matches?setMobileMenu(false,{restoreFocus:true}):setSidebar(!document.body.classList.contains('sidebar-collapsed'));
+mobileMenu.onclick=()=>setMobileMenu(!document.body.classList.contains('menu-open'));
+mobileBackdrop.onclick=()=>setMobileMenu(false,{restoreFocus:true});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&document.body.classList.contains('menu-open'))setMobileMenu(false,{restoreFocus:true})});
+window.matchMedia('(min-width:821px)').addEventListener('change',event=>{if(event.matches)setMobileMenu(false)});
+document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>setMobileMenu(false)));
 function renderSettings(){
  const signed=!!authUser, emailButton=$('settings-email-sync'), productionButton=$('settings-production-import'), correctionButton=$('settings-correction-import'), whatsappButton=$('settings-whatsapp');
  emailButton.hidden=!signed; productionButton.hidden=!signed; correctionButton.hidden=!signed; whatsappButton.hidden=!signed;$('settings-whatsapp-status').textContent=signed?'Defina os grupos e os eventos que o bot deve enviar.':'Entre no sistema para configurar.';
@@ -42,6 +50,8 @@ function renderSettings(){
  $('settings-email-status').textContent=canSync?'Use este computador para consultar o Outlook e atualizar o painel.':'A coleta está configurada em outro computador. Abra o painel nele para atualizar os e-mails.';
 }
 function openPage(page){
+ document.body.dataset.page=page;
+ $('top-summary').hidden=page!=='tracking';
  document.querySelectorAll('.nav-button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
  ['tracking','corrections','fep','draw2data','indicators','settings','controle'].forEach(name=>{const el=$(name+'-page');if(el)el.hidden=name!==page;});
  if(page==='corrections'||page==='indicators'){
