@@ -330,31 +330,36 @@ async function extractLabDimensions(buffer, options = {}) {
         const focused = crop(document.canvasFactory, surface.canvas, frame, 30);
         try {
           const readings = [];
-          for (const psm of [6, 11]) {
+          let focusedDimension = null;
+          for (const psm of options.focusedOnly ? [6] : [6, 11]) {
             await worker.setParameters({ tessedit_pageseg_mode: String(psm), tessedit_char_whitelist: '0123456789.,+-±' });
             const { data } = await worker.recognize(focused.canvas.toBuffer('image/png'), {}, { blocks: true, text: true });
             readings.push(String(data.text || ''));
             const parsed = parseDimension(String(data.text || '').replace(/\s+/g, ''));
             if (parsed && parsed.kind !== 'PLAIN') {
+              focusedDimension = parsed;
+              framedNominals.push({ nominal: parsed.nominal, frame });
               all.push(makeCandidate(parsed, data.text, frame, pageNumber, 0, surface.canvas.height, Math.max(.55, Number(data.confidence || 0) / 100), 'Cota crítica lida dentro da marcação do desenho. Confira a leitura.'));
             }
           }
-          const middle = (frame.x0 + frame.x1) / 2;
-          const left = crop(document.canvasFactory, surface.canvas, { x0: frame.x0, y0: frame.y0, x1: middle, y1: frame.y1 }, 6);
-          const right = crop(document.canvasFactory, surface.canvas, { x0: middle, y0: frame.y0, x1: frame.x1, y1: frame.y1 }, 6);
-          try {
-            await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789.,+-±' });
-            const leftResult = await worker.recognize(left.canvas.toBuffer('image/png'));
-            const rightResult = await worker.recognize(right.canvas.toBuffer('image/png'));
-            const leftNominal = firstNumericValue(leftResult.data.text);
-            if (leftNominal !== null) framedNominals.push({ nominal: leftNominal, frame });
-            const focusedResult = parseFocusedDimension(readings.join('|'), leftResult.data.text, rightResult.data.text);
-            if (focusedResult) {
-              all.push(makeCandidate(focusedResult.parsed, readings.join(' '), frame, pageNumber, 0, surface.canvas.height, focusedResult.inferred ? .58 : .72, focusedResult.inferred ? 'Tolerância reconstruída dentro da marcação crítica. Confira a leitura.' : 'Cota crítica lida dentro da marcação do desenho. Confira a leitura.'));
+          if (!focusedDimension) {
+            const middle = (frame.x0 + frame.x1) / 2;
+            const left = crop(document.canvasFactory, surface.canvas, { x0: frame.x0, y0: frame.y0, x1: middle, y1: frame.y1 }, 6);
+            const right = crop(document.canvasFactory, surface.canvas, { x0: middle, y0: frame.y0, x1: frame.x1, y1: frame.y1 }, 6);
+            try {
+              await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789.,+-±' });
+              const leftResult = await worker.recognize(left.canvas.toBuffer('image/png'));
+              const rightResult = await worker.recognize(right.canvas.toBuffer('image/png'));
+              const leftNominal = firstNumericValue(leftResult.data.text);
+              if (leftNominal !== null) framedNominals.push({ nominal: leftNominal, frame });
+              const focusedResult = parseFocusedDimension(readings.join('|'), leftResult.data.text, rightResult.data.text);
+              if (focusedResult) {
+                all.push(makeCandidate(focusedResult.parsed, readings.join(' '), frame, pageNumber, 0, surface.canvas.height, focusedResult.inferred ? .58 : .72, focusedResult.inferred ? 'Tolerância reconstruída dentro da marcação crítica. Confira a leitura.' : 'Cota crítica lida dentro da marcação do desenho. Confira a leitura.'));
+              }
+            } finally {
+              document.canvasFactory.destroy(left);
+              document.canvasFactory.destroy(right);
             }
-          } finally {
-            document.canvasFactory.destroy(left);
-            document.canvasFactory.destroy(right);
           }
         } finally {
           document.canvasFactory.destroy(focused);
@@ -373,6 +378,11 @@ async function extractLabDimensions(buffer, options = {}) {
         if (matching) {
           all.push(makeCandidate({ nominal: framed.nominal, tolerancePlus: matching.tolerancePlus, toleranceMinus: matching.toleranceMinus }, printable(framed.nominal), framed.frame, pageNumber, 0, surface.canvas.height, .4, 'Tolerância repetida de uma cota crítica simétrica. Confira a leitura.'));
         }
+      }
+
+      if (options.focusedOnly) {
+        document.canvasFactory.destroy(surface);
+        continue;
       }
 
       // A whole-sheet read can skip small labels that are close to profile

@@ -42,7 +42,11 @@ async function processDrawing(fileName,bytes,inputOptions={}){
  try{
   const pdf=await extractPdf(bytes,options),result=analyze({fileName,pdf});
   const vector=result.dimensions;
-  const laboratory=options.mode==='vector'?[]:await extractLabDimensions(bytes,options);
+  // PDFs exported by CAD usually expose most dimensions as searchable text.
+  // In that case the visual layer only needs to inspect the marked critical
+  // regions. This keeps the hosted function inside its execution window while
+  // still recovering tolerances that were converted to curves.
+  const laboratory=options.mode==='vector'?[]:await extractLabDimensions(bytes,{...options,focusedOnly:vector.length>0});
   if(laboratory.length){
    // Vector text is precise when it exists. The laboratory layer adds cotas
    // converted to curves and filters the visual candidates by their geometry.
