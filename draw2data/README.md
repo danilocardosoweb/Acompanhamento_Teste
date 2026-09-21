@@ -44,3 +44,13 @@ Execute `Automacao-Desenhos.cmd` para trabalhar com uma pasta de PDFs. O menu pr
 4. **Atualizar todos os desenhos para o motor atual**: relê todo o lote. Use esta opção quando uma melhoria do motor precisar ser aplicada também aos desenhos já concluídos.
 
 Os arquivos `auditoria-do-lote.xlsx`, `auditoria-do-lote.json`, `relatorio-do-lote.xlsx`, `checkpoint.json` e `progresso-lote.json` ficam na pasta de resultados. A automação grava o progresso após cada desenho e segue até o fim; ela só para em caso de erro não recuperável.
+
+## Carga dos perfis analisados para a base
+
+O comando abaixo importa os perfis de um checkpoint para a base do app e também envia o PDF original de cada um. Ele não sobrescreve um perfil com o mesmo código, sequência e revisão.
+
+```powershell
+node scripts/import-draw2data-profiles.cjs --checkpoint "C:\Users\Danilo\Documents\Draw2Data-Resultados\pasta-23101f3e\checkpoint.json" --commit
+```
+
+Sem `--commit`, o comando apenas simula a carga. Por padrão, entram somente perfis com código identificado, PDF disponível e pelo menos duas cotas válidas; candidatos repetidos para a mesma revisão são reduzidos a um único desenho. O arquivo `importacao-base-draw2data.json` registra os itens importados, ignorados e falhos.
