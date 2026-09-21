@@ -458,7 +458,7 @@ body.app-touch .app-mode-actions{display:flex}
 /* Conferência visual da cota durante o controle dimensional */
 .controle-measurement-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
   gap: 16px;
   align-items: start;
 }
@@ -466,6 +466,8 @@ body.app-touch .app-mode-actions{display:flex}
 .controle-drawing-reference {
   position: sticky;
   top: 16px;
+  width: 100%;
+  box-sizing: border-box;
   min-width: 0;
   padding: 12px;
   border: 1px solid #b8dfd9;
@@ -559,6 +561,15 @@ body.app-touch .app-mode-actions{display:flex}
   box-shadow: inset 3px 0 #008f87;
 }
 
+.controle-measurement[tabindex="0"] {
+  cursor: pointer;
+}
+
+.controle-measurement[tabindex="0"]:focus-visible {
+  outline: 2px solid #008f87;
+  outline-offset: -2px;
+}
+
 .controle-dimension-preview-dialog {
   width: min(92vw, 780px);
   padding: 0;
@@ -594,7 +605,7 @@ body.app-touch .app-mode-actions{display:flex}
     position: static;
     order: -1;
     display: grid;
-    grid-template-columns: minmax(150px, .9fr) minmax(210px, 1.4fr);
+    grid-template-columns: minmax(180px, .8fr) minmax(280px, 1.4fr);
     gap: 8px 14px;
     align-items: center;
   }
@@ -606,7 +617,7 @@ body.app-touch .app-mode-actions{display:flex}
 
   .controle-drawing-reference-preview {
     grid-row: 2 / span 2;
-    min-height: 140px;
+    min-height: 180px;
     margin: 0;
   }
 }
