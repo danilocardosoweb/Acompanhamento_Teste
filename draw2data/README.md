@@ -33,3 +33,14 @@ Quando raios dominam a primeira leitura, a recuperação local também é aciona
 ## Desenhos com cotas pretas e geometria azul
 
 A máscara visual preserva tinta azul e texto escuro neutro, removendo traços longos de construção antes do OCR. Isso permite ler desenhos como o `DIN-004`, em que o perfil está em azul e as cotas estão pretas. O motor também procura agrupamentos de rótulos típicos do quadro técnico e exclui candidatos que caem dentro dessas regiões, evitando trazer área, peso, perímetro e identificação para a lista de dimensões do perfil. Leituras diferentes encontradas próximas são mantidas e sinalizadas para conferência, em vez de escolher silenciosamente uma delas. Antes de salvar, cada leitura deve ser marcada como confirmada ou ignorada. Quando a leitura encontra apenas uma cota, salvar o perfil também exige confirmação explícita de que todas as páginas foram conferidas. Essas proteções não substituem a revisão visual; candidatos OCR continuam sujeitos a erro.
+
+## Automação com retomada e auditoria
+
+Execute `Automacao-Desenhos.cmd` para trabalhar com uma pasta de PDFs. O menu preserva o checkpoint e oferece quatro ações:
+
+1. **Continuar desenhos ainda não analisados**: processa somente PDFs novos, alterados ou que falharam, sem reiniciar o lote.
+2. **Auditar resultados**: confere a pasta de origem contra o checkpoint sem reler os PDFs. O relatório aponta arquivos pendentes, erros, leituras sem/poucas cotas, motor desatualizado e evidências ausentes.
+3. **Revisar desenhos com risco**: relê os pendentes e os arquivos com zero ou poucas cotas, falhas ou evidências incompletas usando o motor atual e uma varredura mais abrangente.
+4. **Atualizar todos os desenhos para o motor atual**: relê todo o lote. Use esta opção quando uma melhoria do motor precisar ser aplicada também aos desenhos já concluídos.
+
+Os arquivos `auditoria-do-lote.xlsx`, `auditoria-do-lote.json`, `relatorio-do-lote.xlsx`, `checkpoint.json` e `progresso-lote.json` ficam na pasta de resultados. A automação grava o progresso após cada desenho e segue até o fim; ela só para em caso de erro não recuperável.
