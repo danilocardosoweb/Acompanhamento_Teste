@@ -18,8 +18,12 @@ echo  1. Continuar desenhos ainda nao analisados
 echo  2. Auditar resultados sem analisar novamente
 echo  3. Revisar desenhos com zero/poucas cotas, falhas ou evidencias pendentes
 echo  4. Atualizar todos os desenhos para o motor atual
+echo  5. Corrigir perfis importados na base com o motor atual
+echo  6. Sincronizar novos resultados seguros com a base
 echo.
-choice /C 1234 /N /M "Escolha uma opcao"
+choice /C 123456 /N /M "Escolha uma opcao"
+if errorlevel 6 goto sync
+if errorlevel 5 goto revalidate
 if errorlevel 4 goto update
 if errorlevel 3 goto review
 if errorlevel 2 goto audit
@@ -39,6 +43,14 @@ goto finish
 
 :update
 node draw2data\batch.cjs atualizar-motor --source "%SOURCE%" --output "%OUTPUT%"
+goto finish
+
+:revalidate
+node scripts\revalidate-imported-profiles.cjs --checkpoint "%OUTPUT%\checkpoint.json" --commit
+goto finish
+
+:sync
+node scripts\import-draw2data-profiles.cjs --checkpoint "%OUTPUT%\checkpoint.json" --commit
 
 :finish
 echo.

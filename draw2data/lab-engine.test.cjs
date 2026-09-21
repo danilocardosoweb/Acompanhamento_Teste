@@ -1,6 +1,6 @@
 const assert = require('assert/strict');
 const { parseDimension, parseRadiusDimension, parseCompactSymmetric, parseNearbyDimension, normalizeTechnicalText, focusedOnlyForPage, shouldRunNeighborhoodRecovery, isDimensionInk } = require('./lab-engine.cjs');
-const { classifyDimension, prioritizeDimensions } = require('./processing.cjs');
+const { classifyDimension, prioritizeDimensions, inferAdministrativeZones, applyStrictCandidateGate } = require('./processing.cjs');
 const { detectDimensions, identifyTool } = require('./detection.cjs');
 const { preferFlatBarProfileView, analysisVersionFor, ENGINE_VERSION, FLAT_BAR_ENGINE_VERSION, SPARSE_PAGE_DIMENSION_THRESHOLD, sparsePageNumbers, findNearbyReadingConflicts, findTitleBlockRegions, filterTitleBlockDimensions } = require('./processing.cjs');
 const { nextRevision, compareProfiles, describeChanges } = require('../revision-tools.js');
@@ -56,7 +56,7 @@ assert.deepEqual(bcSelection.dimensions.map(item => item.rawText), ['160 ± 0,75
 assert.deepEqual(bcSelection.diagnostics.ignoredPackagingPages, [1]);
 assert.equal(analysisVersionFor('BC-507.pdf'), FLAT_BAR_ENGINE_VERSION);
 assert.equal(analysisVersionFor('TP-8377.pdf'), ENGINE_VERSION);
-assert.equal(ENGINE_VERSION, '3.8-black-and-blue-titleblock-filter');
+assert.equal(ENGINE_VERSION, '4.0-strict-region-and-geometry-gate');
 assert.equal(SPARSE_PAGE_DIMENSION_THRESHOLD, 3);
 assert.deepEqual(sparsePageNumbers([
   { page: 1 }, { page: 1 }, { page: 1 }, { page: 1 },
@@ -93,6 +93,20 @@ assert.deepEqual(filterTitleBlockDimensions([
   {page:1,x:490,y:720,width:10,height:5,nominal:157},
   {page:1,x:180,y:620,width:12,height:5,nominal:68}
 ], [titleBlockPage]).dimensions.map(item=>item.nominal),[68], 'both title-block areas must be excluded while profile dimensions remain');
+const strictPage={page:1,width:842,height:595,items:[]};
+const strictCandidates=[
+  {page:1,source:'OCR_LAB',rawText:'156 ± 1,1',nominal:156,tolerancePlus:1.1,toleranceMinus:1.1,confidence:.57,x:205,y:370,width:27,height:7},
+  {page:1,source:'OCR_LAB',rawText:'31',nominal:31,tolerancePlus:null,toleranceMinus:null,confidence:.95,x:718,y:233,width:6,height:5},
+  {page:1,source:'OCR_LAB',rawText:'20',nominal:20,tolerancePlus:null,toleranceMinus:null,confidence:.84,x:467,y:122,width:3,height:8},
+  {page:1,source:'OCR_LAB',rawText:'33',nominal:33,tolerancePlus:null,toleranceMinus:null,confidence:.78,x:581,y:108,width:2,height:6},
+  {page:1,source:'OCR_LAB',rawText:'382',nominal:382,tolerancePlus:null,toleranceMinus:null,confidence:.65,x:780,y:95,width:6,height:4},
+  {page:1,source:'OCR_LAB',rawText:'157',nominal:157,tolerancePlus:null,toleranceMinus:null,confidence:.96,x:723,y:87,width:6,height:4},
+  {page:1,source:'OCR_LAB',rawText:'R8',nominal:8,tolerancePlus:null,toleranceMinus:null,symbol:'R',dimensionType:'RADIUS',confidence:.35,x:773,y:81,width:5,height:56},
+];
+assert.equal(inferAdministrativeZones(strictCandidates,[strictPage]).some(zone=>zone.type==='QUADRO_INFERIOR'),true);
+const strictResult=applyStrictCandidateGate(strictCandidates,[strictPage],[]);
+assert.deepEqual(strictResult.accepted.map(item=>item.rawText),['156 ± 1,1','31']);
+assert.equal(strictResult.suggestions.length,5);
 
 assert.equal(nextRevision([]), '00');
 assert.equal(nextRevision([{ revision: '00' }, { revision: '02' }]), '03');

@@ -388,7 +388,10 @@ async function scanNearDetectedDimensions(document, worker, surface, all, pageNu
           const text = String(line.text || '').trim();
           const parsed = parseNearbyDimension(text);
           if (!parsed) continue;
-          if (parsed.kind === 'PLAIN' && (parsed.nominal < .5 || parsed.nominal > 500)) continue;
+          // A vizinhança ampliada serve para recuperar tolerâncias e raios
+          // explícitos. Um número simples nesta passagem não prova que exista
+          // uma linha de cota e gerava falsos positivos em carimbos e tabelas.
+          if (parsed.kind === 'PLAIN') continue;
           const box = { x0: region.x0 + line.bbox.x0 / scale, y0: region.y0 + line.bbox.y0 / scale, x1: region.x0 + line.bbox.x1 / scale, y1: region.y0 + line.bbox.y1 / scale };
           const reason = parsed.kind === 'RADIUS'
             ? 'Raio identificado pelo símbolo R em uma região ampliada. Confira a leitura.'
@@ -398,7 +401,6 @@ async function scanNearDetectedDimensions(document, worker, surface, all, pageNu
               ? 'Tolerância simétrica reconstruída em uma região ampliada. Confira a leitura.'
               : 'Cota técnica adicional lida perto de outra cota. Confira a posição no desenho.';
           const candidate = makeCandidate(parsed, text, box, pageNumber, 0, surface.canvas.height, Number(line.confidence || data.confidence || 0) / 100, reason);
-          if (parsed.kind === 'PLAIN') candidate.confidence = Math.min(candidate.confidence, .65);
           all.push(candidate);
         }
       }

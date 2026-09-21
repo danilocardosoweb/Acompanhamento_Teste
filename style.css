@@ -621,3 +621,5 @@ body.app-touch .app-mode-actions{display:flex}
     margin: 10px 0 8px;
   }
 }
+.draw2data-suggestions{margin:12px 0;border:1px solid #e4b95d;border-radius:12px;background:#fffaf0;padding:12px 14px}.draw2data-suggestions summary{cursor:pointer;font-weight:700;color:#7a4b00}.draw2data-suggestions>p{margin:10px 0;color:#6b5a3d}.draw2data-suggestion{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid #ead9b5}.draw2data-suggestion strong,.draw2data-suggestion small{display:block}.draw2data-suggestion small{margin-top:3px;color:#75684f}.draw2data-suggestion button{white-space:nowrap}
+.controle-profile-item.is-pending{background:#fff8e8;border-left:4px solid #d69b24;padding-left:12px}.controle-profile-item.is-pending strong{color:#7a4b00}

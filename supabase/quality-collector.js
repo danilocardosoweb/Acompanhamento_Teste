@@ -112,18 +112,25 @@ Deno.serve(async req=>{
    if(!uuid(id)||!tool||!name||(sequence!==null&&(!Number.isInteger(sequence)||sequence<1))||(drawingPath!==null&&(!validPath(drawingPath)||!drawingPath.startsWith('control-drawings/'))))return respond({error:'Dados do perfil inválidos.'},400);
    const duplicate=await(await api(`/rest/v1/quality_control_profiles?tool=eq.${encodeURIComponent(tool)}&${sequence===null?'sequence=is.null':`sequence=eq.${sequence}`}&revision=eq.${encodeURIComponent(revision)}&select=id&limit=1`)).json();
    if(duplicate.length)return respond({error:`Já existe o perfil ${tool} · Rev. ${revision}. Ajuste a revisão ou edite o perfil existente.`},409);
-   const row={id,tool,sequence,revision,name,dimensions:controlDimensions(body.dimensions),drawing_path:drawingPath,active:true,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+   const row={id,tool,sequence,revision,name,dimensions:controlDimensions(body.dimensions),drawing_path:drawingPath,active:body.active!==false,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
    await api('/rest/v1/quality_control_profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(row)});
    return respond(profileRow(row),201);
   }
   if(action==='control-profiles-update'&&req.method==='POST') {
    const body=await req.json(),id=String(body.id||'');if(!uuid(id))return respond({error:'Perfil inválido.'},400);
    const found=await(await api(`/rest/v1/quality_control_profiles?id=eq.${id}&select=*&limit=1`)).json(),current=found[0];if(!current)return respond({error:'Perfil não encontrado.'},404);
-   const tool=body.tool===undefined?current.tool:cleanText(body.tool,80).toUpperCase(),revision=body.revision===undefined?current.revision:cleanText(body.revision,40),name=body.name===undefined?current.name:cleanText(body.name,200),drawingPath=body.drawingPath===undefined?current.drawing_path:body.drawingPath?String(body.drawingPath):null;
+   const tool=body.tool===undefined?current.tool:cleanText(body.tool,80).toUpperCase(),revision=body.revision===undefined?current.revision:cleanText(body.revision,40),name=body.name===undefined?current.name:cleanText(body.name,200),drawingPath=body.drawingPath===undefined?current.drawing_path:body.drawingPath?String(body.drawingPath):null,active=body.active===undefined?current.active:body.active===true,dimensions=body.dimensions===undefined?current.dimensions:controlDimensions(body.dimensions);
    if(!tool||!revision||!name||(drawingPath!==null&&(!validPath(drawingPath)||!drawingPath.startsWith('control-drawings/'))))return respond({error:'Dados do perfil inválidos.'},400);
    const duplicate=await(await api(`/rest/v1/quality_control_profiles?tool=eq.${encodeURIComponent(tool)}&${current.sequence===null?'sequence=is.null':`sequence=eq.${current.sequence}`}&revision=eq.${encodeURIComponent(revision)}&id=neq.${id}&select=id&limit=1`)).json();
    if(duplicate.length)return respond({error:`Já existe o perfil ${tool} · Rev. ${revision}.`},409);
-   const row={...current,tool,name,revision,drawing_path:drawingPath,updated_at:new Date().toISOString()};await api(`/rest/v1/quality_control_profiles?id=eq.${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({tool,name,revision,drawing_path:drawingPath,updated_at:row.updated_at})});return respond(profileRow(row));
+   const row={...current,tool,name,revision,dimensions,drawing_path:drawingPath,active,updated_at:new Date().toISOString()};await api(`/rest/v1/quality_control_profiles?id=eq.${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({tool,name,revision,dimensions,drawing_path:drawingPath,active,updated_at:row.updated_at})});return respond(profileRow(row));
+  }
+  if(action==='control-profiles-bulk-status'&&req.method==='POST') {
+   const body=await req.json(),ids=Array.isArray(body.ids)?[...new Set(body.ids.map(String))]:[],active=body.active===true;
+   if(!ids.length||ids.length>500||ids.some(id=>!uuid(id)))return respond({error:'Lista de perfis inválida.'},400);
+   const updatedAt=new Date().toISOString();
+   await api(`/rest/v1/quality_control_profiles?id=in.(${ids.join(',')})`,{method:'PATCH',headers:{'Content-Type':'application/json',Prefer:'return=representation'},body:JSON.stringify({active,updated_at:updatedAt})});
+   return respond({ok:true,updated:ids.length,active,updatedAt});
   }
   if(action==='control-profiles-delete'&&req.method==='POST') {
    const body=await req.json(),id=String(body.id||'');if(!uuid(id))return respond({error:'Perfil inválido.'},400);
@@ -136,7 +143,7 @@ Deno.serve(async req=>{
   if(action==='inspections'&&req.method==='POST') {
    const body=await req.json(),id=String(body.id||crypto.randomUUID()),profileId=String(body.profileId||''),sequence=body.sequence==null||body.sequence===''?NaN:Number(body.sequence),measurements=Array.isArray(body.measurements)?body.measurements:[],evidence=Array.isArray(body.evidence)?body.evidence:[];
    if(!uuid(id)||!uuid(profileId)||!Number.isInteger(sequence)||sequence<1||!measurements.length||measurements.length>500||evidence.length>4)return respond({error:'Dados da inspeção inválidos.'},400);
-   const profiles=await(await api(`/rest/v1/quality_control_profiles?id=eq.${profileId}&select=*&limit=1`)).json(),profile=profiles[0];if(!profile)return respond({error:'Perfil de controle não encontrado.'},404);
+   const profiles=await(await api(`/rest/v1/quality_control_profiles?id=eq.${profileId}&select=*&limit=1`)).json(),profile=profiles[0];if(!profile)return respond({error:'Perfil de controle não encontrado.'},404);if(profile.active===false)return respond({error:'Este perfil aguarda validação e ainda não pode receber medições.'},409);
    const date=/^\d{4}-\d{2}-\d{2}$/.test(String(body.date||''))?String(body.date):new Date().toISOString().slice(0,10);
    const row={id,profile_id:profileId,tool:profile.tool,sequence,test_date:date,client:cleanText(body.client,200),part:cleanText(body.part,200),quantity:Math.max(1,Math.min(100000,Number(body.quantity)||1)),lot:cleanText(body.lot,200),operator:cleanText(body.operator,200),shift:cleanText(body.shift,100),observations:cleanText(body.observations,10000),measurements,created_by:uuid(body.userId)?body.userId:null,created_by_name:cleanText(body.userName,200),created_at:new Date().toISOString()};
    for(const item of evidence){if(!uuid(item?.id)||!validPath(item?.path)||!String(item.path).startsWith(`control-evidence/${id}/`)||!['image/jpeg','image/png','image/webp'].includes(item.mimeType)||!Number.isInteger(Number(item.size))||Number(item.size)<1||Number(item.size)>3*1024*1024)return respond({error:'Foto de evidência inválida.'},400);}

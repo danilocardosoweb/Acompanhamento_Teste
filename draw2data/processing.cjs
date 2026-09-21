@@ -2,9 +2,9 @@ const {extractPdf}=require('./reader.cjs');
 const {analyze}=require('./detection.cjs');
 const {extractVisualDimensions}=require('./ocr.cjs');
 const {extractLabDimensions}=require('./lab-engine.cjs');
-const ENGINE_VERSION='3.8-black-and-blue-titleblock-filter';
-const DETAILED_ENGINE_VERSION='3.6-black-and-blue-titleblock-filter';
-const FLAT_BAR_ENGINE_VERSION='3.7-black-and-blue-titleblock-filter';
+const ENGINE_VERSION='4.0-strict-region-and-geometry-gate';
+const DETAILED_ENGINE_VERSION='4.0-strict-region-and-geometry-gate';
+const FLAT_BAR_ENGINE_VERSION='4.0-strict-region-and-geometry-gate';
 const SPARSE_PAGE_DIMENSION_THRESHOLD=3;
 let busy=false;
 
@@ -102,6 +102,64 @@ function filterTitleBlockDimensions(dimensions,pages=[]){
  }
  return {dimensions:kept,excluded,regions};
 }
+function inferAdministrativeZones(dimensions,pages=[]){
+ const pageMap=new Map(pages.map(page=>[Number(page.page),page])),zones=[];
+ for(const [pageNumber,page] of pageMap){
+  const width=Number(page.width)||0,height=Number(page.height)||0;
+  if(!width||!height)continue;
+  const candidates=dimensions.filter(item=>Number(item.page)===pageNumber&&item.source==='OCR_LAB');
+  const bottom=candidates.filter(item=>{
+   const centerY=Number(item.y)+Number(item.height||0)/2;
+   return Number.isFinite(centerY)&&centerY<height*.28;
+  });
+  if(bottom.length>=4){
+   const centers=bottom.map(item=>Number(item.x)+Number(item.width||0)/2).filter(Number.isFinite);
+   if(centers.length>=4&&Math.max(...centers)-Math.min(...centers)>=width*.2){
+    zones.push({page:pageNumber,type:'QUADRO_INFERIOR',x0:Math.max(0,Math.min(...centers)-40),y0:0,x1:Math.min(width,Math.max(...centers)+40),y1:height*.3});
+   }
+  }
+  for(const side of ['left','right']){
+   const edge=candidates.filter(item=>{
+    const centerX=Number(item.x)+Number(item.width||0)/2;
+    return Number.isFinite(centerX)&&(side==='left'?centerX<width*.14:centerX>width*.86);
+   });
+   if(edge.length<5)continue;
+   const centers=edge.map(item=>Number(item.y)+Number(item.height||0)/2).filter(Number.isFinite);
+   if(centers.length>=5&&Math.max(...centers)-Math.min(...centers)>=height*.35){
+    zones.push({page:pageNumber,type:'MATRIZ_LATERAL',x0:side==='left'?0:width*.84,y0:Math.max(0,Math.min(...centers)-30),x1:side==='left'?width*.16:width,y1:Math.min(height,Math.max(...centers)+30)});
+   }
+  }
+ }
+ return zones;
+}
+function strictCandidateReason(item,page,zones,conflicted=false){
+ if(!item||item.source!=='OCR_LAB')return null;
+ const width=Number(item.width),height=Number(item.height),confidence=Number(item.confidence||0);
+ const centerX=Number(item.x)+width/2,centerY=Number(item.y)+height/2;
+ const region=zones.find(zone=>Number(zone.page)===Number(item.page)&&centerX>=zone.x0&&centerX<=zone.x1&&centerY>=zone.y0&&centerY<=zone.y1);
+ if(region)return region.type;
+ if(![width,height,centerX,centerY].every(Number.isFinite)||width<=0||height<=0)return 'POSICAO_OCR_INVALIDA';
+ const pageWidth=Number(page?.width)||842,pageHeight=Number(page?.height)||595,aspect=Math.max(width,height)/Math.max(.1,Math.min(width,height));
+ if(width>pageWidth*.16||height>pageHeight*.06||aspect>8)return 'CAIXA_OCR_INCOMPATIVEL_COM_COTA';
+ if(conflicted)return 'LEITURAS_CONFLITANTES_NA_MESMA_POSICAO';
+ const toleranced=item.tolerancePlus!==null&&item.tolerancePlus!==undefined||item.toleranceMinus!==null&&item.toleranceMinus!==undefined;
+ const radius=item.symbol==='R'||item.dimensionType==='RADIUS';
+ if(!toleranced&&!radius&&/regi[aã]o ampliada/i.test(String(item.reviewReason||'')))return 'NUMERO_SIMPLES_SEM_GEOMETRIA_DE_COTA';
+ if(toleranced&&confidence<.35)return 'CONFIANCA_INSUFICIENTE';
+ if(radius&&confidence<.55)return 'RAIO_SEM_EVIDENCIA_SUFICIENTE';
+ if(!toleranced&&!radius&&confidence<.72)return 'NUMERO_SIMPLES_COM_BAIXA_CONFIANCA';
+ return null;
+}
+function applyStrictCandidateGate(dimensions,pages=[],conflicts=[]){
+ const pageMap=new Map(pages.map(page=>[Number(page.page),page])),zones=inferAdministrativeZones(dimensions,pages);
+ const conflicted=new Set(conflicts.flatMap(item=>[item.left,item.right]));
+ const accepted=[],suggestions=[];
+ dimensions.forEach((item,index)=>{
+  const reason=strictCandidateReason(item,pageMap.get(Number(item.page)),zones,conflicted.has(index));
+  if(reason)suggestions.push({...item,status:'SUGESTAO',exclusionReason:reason});else accepted.push(item);
+ });
+ return {accepted,suggestions,zones};
+}
 function validateDimensions(dimensions){
  const accepted=[],discarded=[];
  for(const original of dimensions){const item=normalizeDimension(original);if(!item){discarded.push(original);continue;}
@@ -196,8 +254,12 @@ async function processDrawing(fileName,bytes,inputOptions={}){
   const flatBarSelection=flatBar?preferFlatBarProfileView(result.dimensions,pdf.pages):{dimensions:result.dimensions,diagnostics:{applied:false,rightSideThreshold:null,removedDimensions:0,ignoredPackagingPages:[]}};
   result.dimensions=flatBarSelection.dimensions;
   if(flatBar&&flatBarSelection.diagnostics.applied)result.warnings=[...(result.warnings||[]),'Barra chata BC: priorizadas as cotas do desenho à direita; confira a evidência visual antes de confirmar.'];
-  const checked=validateDimensions(result.dimensions);result.dimensions=prioritizeDimensions(checked.accepted.filter(item=>(options.includePlain||item.tolerancePlus!==null||item.toleranceMinus!==null)&&Number(item.confidence||0)>=options.minConfidence));
-  result.diagnostics={...(result.diagnostics||{}),titleBlockFilter:{applied:titleBlockSelection.excluded.length>0,excludedReadings:titleBlockSelection.excluded.length,regions:titleBlockSelection.regions},flatBarRightView:flatBarSelection.diagnostics,coverageRecovery:{applied:recoveryPages.length>0,pages:recoveryPages,threshold:SPARSE_PAGE_DIMENSION_THRESHOLD},discardedDimensions:checked.discarded.length,nearbyReadingConflicts:checked.conflicts.length,reviewDimensions:result.dimensions.filter(item=>item.status==='REVISAR').length};
+  const checked=validateDimensions(result.dimensions),strict=applyStrictCandidateGate(checked.accepted,pdf.pages,checked.conflicts);
+  result.dimensions=prioritizeDimensions(strict.accepted.filter(item=>(options.includePlain||item.tolerancePlus!==null||item.toleranceMinus!==null)&&Number(item.confidence||0)>=options.minConfidence));
+  result.suggestions=prioritizeDimensions(strict.suggestions);
+  const exclusionReasons=result.suggestions.reduce((summary,item)=>(summary[item.exclusionReason]=(summary[item.exclusionReason]||0)+1,summary),{});
+  result.diagnostics={...(result.diagnostics||{}),titleBlockFilter:{applied:titleBlockSelection.excluded.length>0,excludedReadings:titleBlockSelection.excluded.length,regions:titleBlockSelection.regions},strictCandidateGate:{applied:strict.suggestions.length>0,accepted:result.dimensions.length,suggestions:strict.suggestions.length,zones:strict.zones,exclusionReasons},flatBarRightView:flatBarSelection.diagnostics,coverageRecovery:{applied:recoveryPages.length>0,pages:recoveryPages,threshold:SPARSE_PAGE_DIMENSION_THRESHOLD},discardedDimensions:checked.discarded.length,nearbyReadingConflicts:checked.conflicts.length,reviewDimensions:result.dimensions.filter(item=>item.status==='REVISAR').length};
+  if(result.suggestions.length)result.warnings=[...(result.warnings||[]),`${result.suggestions.length} leitura(s) sem evidência geométrica suficiente foram separadas como sugestões e não entrarão automaticamente no perfil.`];
   if(recoveryPages.length)result.warnings=[...(result.warnings||[]),`Poucas cotas pesquisáveis em ${recoveryPages.length} página(s); foi feita varredura visual ampliada. Confira as cotas e as evidências antes de confirmar.`];
   const radiusCount=result.dimensions.filter(item=>item.dimensionType==='RADIUS').length;
   const linearCount=result.dimensions.filter(item=>item.dimensionType==='LINEAR'||item.dimensionType==='TOLERANCED_LINEAR').length;
@@ -214,4 +276,4 @@ async function processDrawing(fileName,bytes,inputOptions={}){
   result.engineVersion=analysisVersionFor(fileName,options);return result;
  }finally{busy=false;}
 }
-module.exports={processDrawing,drawingOptions,ENGINE_VERSION,DETAILED_ENGINE_VERSION,FLAT_BAR_ENGINE_VERSION,SPARSE_PAGE_DIMENSION_THRESHOLD,analysisVersionFor,preferFlatBarProfileView,sparsePageNumbers,classifyDimension,prioritizeDimensions,findNearbyReadingConflicts,findTitleBlockRegions,filterTitleBlockDimensions};
+module.exports={processDrawing,drawingOptions,ENGINE_VERSION,DETAILED_ENGINE_VERSION,FLAT_BAR_ENGINE_VERSION,SPARSE_PAGE_DIMENSION_THRESHOLD,analysisVersionFor,preferFlatBarProfileView,sparsePageNumbers,classifyDimension,prioritizeDimensions,findNearbyReadingConflicts,findTitleBlockRegions,filterTitleBlockDimensions,inferAdministrativeZones,strictCandidateReason,applyStrictCandidateGate};

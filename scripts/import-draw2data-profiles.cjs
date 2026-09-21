@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { analysisVersionFor } = require('../draw2data/processing.cjs');
 
 const root = path.join(__dirname, '..');
 const defaultCheckpoint = path.join(process.env.USERPROFILE || '', 'Documents', 'Draw2Data-Resultados', 'pasta-23101f3e', 'checkpoint.json');
@@ -23,7 +24,7 @@ function readOptions(argv) {
 
 function help() {
   console.log('Uso: node scripts/import-draw2data-profiles.cjs [--checkpoint "C:\\...\\checkpoint.json"] [--min-dimensions 2] [--limit 50] [--commit]');
-  console.log('Sem --commit, apenas lista o que seria importado. A importação nunca sobrescreve um perfil ou revisão existente.');
+  console.log('Sem --commit, apenas lista o que seria sincronizado. Perfis automáticos ficam suspensos até a validação humana.');
 }
 
 function keyOf(item) {
@@ -44,7 +45,9 @@ function dimensionRows(entry) {
 
 function isEligible(entry, minimum) {
   const tool = String(entry.tool || '').trim().toUpperCase();
+  const expectedEngine = analysisVersionFor(path.basename(entry.sourcePath || entry.relativePath || ''), { detailedScan: true });
   return !!entry.analysis && !entry.error && tool && tool !== 'NAO_IDENTIFICADO' && !entry.codeConflict &&
+    entry.analysis.engineVersion === expectedEngine && entry.analysis.diagnostics?.strictCandidateGate &&
     dimensionRows(entry).length >= minimum && typeof entry.sourcePath === 'string' && fs.existsSync(entry.sourcePath) &&
     fs.statSync(entry.sourcePath).size > 0 && fs.statSync(entry.sourcePath).size <= 25 * 1024 * 1024;
 }
@@ -88,12 +91,12 @@ async function main() {
   const selected = [...groups.values()].map(chooseCandidate).slice(0, options.limit);
   const duplicateCandidates = [...groups.values()].reduce((count, entries) => count + Math.max(0, entries.length - 1), 0);
   const manifest = {
-    format: 'draw2data-profile-import-v1',
+    format: 'draw2data-profile-sync-v2',
     generatedAt: new Date().toISOString(),
     checkpoint: checkpointPath,
     mode: options.commit ? 'COMMIT' : 'SIMULACAO',
-    criteria: { minDimensions: options.minDimensions, requiresKnownTool: true, requiresSourcePdf: true, maxPdfBytes: 25 * 1024 * 1024 },
-    summary: { checkpointRecords: allEntries.length, candidates: selected.length, duplicateCandidates, imported: 0, existing: 0, failed: 0 },
+    criteria: { minDimensions: options.minDimensions, requiresKnownTool: true, requiresCurrentStrictEngine: true, requiresSourcePdf: true, maxPdfBytes: 25 * 1024 * 1024, initialStatus: 'AGUARDANDO_VALIDACAO' },
+    summary: { checkpointRecords: allEntries.length, candidates: selected.length, duplicateCandidates, imported: 0, updated: 0, existing: 0, failed: 0 },
     items: []
   };
   const endpoint = credentials.endpoint;
@@ -106,38 +109,37 @@ async function main() {
     return response;
   }
   const existing = await (await call('control-profiles')).json();
-  const existingKeys = new Set(existing.map(keyOf));
+  const existingByKey = new Map(existing.map(profile => [keyOf(profile), profile]));
   for (const entry of selected) {
     const tool = String(entry.tool).trim().toUpperCase();
     const revision = String(entry.revision || '00').trim() || '00';
     const key = keyOf({ tool, sequence: entry.sequence, revision });
     const item = { file: entry.relativePath, tool, revision, dimensions: dimensionRows(entry).length, status: '' };
-    if (existingKeys.has(key)) {
-      item.status = 'JA_EXISTE';
-      manifest.summary.existing += 1;
-      manifest.items.push(item);
-      continue;
-    }
+    const current = existingByKey.get(key);
+    const managedImport = current && /\(importado\)/i.test(String(current.name || ''));
+    if (current && !managedImport) { item.status = 'JA_EXISTE_MANUAL'; manifest.summary.existing += 1; manifest.items.push(item); continue; }
     if (!options.commit) {
-      item.status = 'PRONTO_PARA_IMPORTAR';
+      item.status = current ? 'PRONTO_PARA_ATUALIZAR_SUSPENSO' : 'PRONTO_PARA_IMPORTAR_SUSPENSO';
       manifest.items.push(item);
       continue;
     }
     const id = crypto.randomUUID();
-    const drawingPath = `control-drawings/${id}.pdf`;
+    const profileId = current?.id || id;
+    const drawingPath = current?.drawingPath || `control-drawings/${profileId}.pdf`;
     try {
-      await call('file', { method: 'PUT', object: drawingPath, type: 'application/pdf', body: fs.readFileSync(entry.sourcePath) });
-      await call('control-profiles', {
-        method: 'POST',
-        body: JSON.stringify({
-          id, tool, sequence: entry.sequence == null ? null : entry.sequence, revision,
-          name: `${tool} - Perfil dimensional (importado)`, dimensions: dimensionRows(entry), drawingPath
-        })
-      });
-      existingKeys.add(key);
-      item.status = 'IMPORTADO';
-      item.id = id;
-      manifest.summary.imported += 1;
+      if (!current?.drawingPath) await call('file', { method: 'PUT', object: drawingPath, type: 'application/pdf', body: fs.readFileSync(entry.sourcePath) });
+      if (current) {
+        await call('control-profiles-update', { method: 'POST', body: JSON.stringify({ id: current.id, dimensions: dimensionRows(entry), drawingPath, active: false }) });
+        item.status = 'ATUALIZADO_SUSPENSO'; item.id = current.id; manifest.summary.updated += 1;
+      } else {
+        await call('control-profiles', {
+          method: 'POST',
+          body: JSON.stringify({ id: profileId, tool, sequence: entry.sequence == null ? null : entry.sequence, revision,
+            name: `${tool} - Perfil dimensional (importado)`, dimensions: dimensionRows(entry), drawingPath, active: false })
+        });
+        existingByKey.set(key, { id: profileId, tool, sequence: entry.sequence, revision, name: `${tool} - Perfil dimensional (importado)`, drawingPath, active: false });
+        item.status = 'IMPORTADO_SUSPENSO'; item.id = profileId; manifest.summary.imported += 1;
+      }
     } catch (error) {
       item.status = 'FALHOU';
       item.error = error.message;

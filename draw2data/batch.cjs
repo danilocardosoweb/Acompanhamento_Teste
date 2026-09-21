@@ -198,8 +198,10 @@ function auditFinding({ sourcePath, relativePath, entry, output, settings }) {
   const missingEvidence = dimensions.some(dimension => !dimension.evidencePath || !fs.existsSync(path.join(output, dimension.evidencePath)));
   if (dimensions.length && missingEvidence) flags.push('EVIDENCIA_PENDENTE');
   const warnings = entry?.analysis?.warnings || [];
+  const suggestions = Array.isArray(entry?.analysis?.suggestions) ? entry.analysis.suggestions : [];
+  if (suggestions.length) flags.push('SUGESTOES_SEPARADAS');
   if (warnings.some(warning => /apenas uma cota|mais raios|nenhuma cota|conferir o desenho original/i.test(String(warning)))) flags.push('LEITURA_INCERTA');
-  const reviewRecommended = sourceExists && flags.some(flag => ['NAO_ANALISADO', 'FALHA_NA_ANALISE', 'SEM_COTAS', 'POUCAS_COTAS', 'EVIDENCIA_PENDENTE', 'LEITURA_INCERTA'].includes(flag));
+  const reviewRecommended = sourceExists && flags.some(flag => ['NAO_ANALISADO', 'FALHA_NA_ANALISE', 'SEM_COTAS', 'POUCAS_COTAS', 'EVIDENCIA_PENDENTE', 'LEITURA_INCERTA', 'SUGESTOES_SEPARADAS'].includes(flag));
   return {
     relativePath,
     sourcePath: sourcePath || entry?.sourcePath || '',
@@ -211,6 +213,7 @@ function auditFinding({ sourcePath, relativePath, entry, output, settings }) {
     reviewRecommended,
     sourceExists,
     warning: warnings.join(' | '),
+    suggestions: suggestions.length,
   };
 }
 
@@ -249,6 +252,7 @@ function writeAudit(output, sourceRoot, files, checkpoint, settings) {
     Arquivo: item.relativePath,
     Ferramenta: item.tool,
     'Cotas encontradas': item.dimensions,
+    'Sugestões separadas': item.suggestions,
     Situação: item.flags.join(' · ') || 'OK',
     'Revisar automaticamente': item.reviewRecommended ? 'SIM' : 'NÃO',
     'Motor usado': item.engineVersion || '—',
