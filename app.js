@@ -43,6 +43,75 @@ mobileBackdrop.onclick=()=>setMobileMenu(false,{restoreFocus:true});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&document.body.classList.contains('menu-open'))setMobileMenu(false,{restoreFocus:true})});
 window.matchMedia('(min-width:821px)').addEventListener('change',event=>{if(event.matches)setMobileMenu(false)});
 document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>setMobileMenu(false)));
+const appModeActions=document.createElement('div');
+appModeActions.className='app-mode-actions';
+appModeActions.setAttribute('aria-label','Opções do aplicativo');
+const installAppButton=document.createElement('button');
+installAppButton.type='button';
+installAppButton.className='app-mode-action secondary';
+installAppButton.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11M8 10l4 4 4-4M5 18v3h14v-3"/></svg><span>Instalar</span>';
+installAppButton.hidden=true;
+const fullscreenButton=document.createElement('button');
+fullscreenButton.type='button';
+fullscreenButton.className='app-mode-action secondary';
+fullscreenButton.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg><span>Tela cheia</span>';
+fullscreenButton.hidden=true;
+const appModeNotice=document.createElement('p');
+appModeNotice.className='app-mode-notice';
+appModeNotice.setAttribute('role','status');
+appModeNotice.setAttribute('aria-live','polite');
+appModeActions.append(installAppButton,fullscreenButton,appModeNotice);
+document.querySelector('header .sync-access')?.after(appModeActions);
+let deferredInstallPrompt=null,appModeNoticeTimer=0;
+const isAppleTouchDevice=()=>/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const isStandalone=()=>window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+function refreshAppMode(){
+ const touch=window.matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0;
+ const phone=touch&&window.innerWidth<=820;
+ const tablet=touch&&!phone&&window.innerWidth<=1366;
+ const standalone=isStandalone();
+ document.body.classList.toggle('app-touch',touch);
+ document.body.classList.toggle('app-phone',phone);
+ document.body.classList.toggle('app-tablet',tablet);
+ document.body.classList.toggle('app-standalone',standalone);
+ installAppButton.hidden=!touch||standalone||(!deferredInstallPrompt&&!isAppleTouchDevice());
+ fullscreenButton.hidden=!touch||standalone||!document.documentElement.requestFullscreen;
+ fullscreenButton.classList.toggle('is-active',!!document.fullscreenElement);
+ fullscreenButton.querySelector('span').textContent=document.fullscreenElement?'Sair da tela cheia':'Tela cheia';
+}
+function showAppModeNotice(message){
+ window.clearTimeout(appModeNoticeTimer);
+ appModeNotice.textContent=message;
+ appModeNotice.hidden=false;
+ appModeNoticeTimer=window.setTimeout(()=>{appModeNotice.hidden=true;},6500);
+}
+window.addEventListener('resize',refreshAppMode,{passive:true});
+window.addEventListener('orientationchange',refreshAppMode,{passive:true});
+window.matchMedia('(display-mode: standalone)').addEventListener?.('change',refreshAppMode);
+document.addEventListener('fullscreenchange',refreshAppMode);
+window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstallPrompt=event;refreshAppMode();});
+window.addEventListener('appinstalled',()=>{deferredInstallPrompt=null;refreshAppMode();showAppModeNotice('Aplicativo instalado. Abra pelo ícone para usar sem a barra do navegador.');});
+installAppButton.addEventListener('click',async()=>{
+ if(deferredInstallPrompt){
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt=null;
+  refreshAppMode();
+  return;
+ }
+ showAppModeNotice('No iPhone ou iPad, abra no Safari, toque em Compartilhar e escolha “Adicionar à Tela de Início”.');
+});
+fullscreenButton.addEventListener('click',async()=>{
+ try{
+  if(document.fullscreenElement)await document.exitFullscreen();
+  else{
+   try{await document.documentElement.requestFullscreen({navigationUI:'hide'});}
+   catch(error){if(error instanceof TypeError)await document.documentElement.requestFullscreen();else throw error;}
+  }
+ }catch{showAppModeNotice('Este navegador não permite tela cheia aqui. Instale o aplicativo para usar sem a barra do navegador.');}
+});
+refreshAppMode();
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/service-worker.js',{updateViaCache:'none'}).catch(()=>{}));}
 function renderSettings(){
  const signed=!!authUser, emailButton=$('settings-email-sync'), productionButton=$('settings-production-import'), correctionButton=$('settings-correction-import'), whatsappButton=$('settings-whatsapp');
  emailButton.hidden=!signed; productionButton.hidden=!signed; correctionButton.hidden=!signed; whatsappButton.hidden=!signed;$('settings-whatsapp-status').textContent=signed?'Defina os grupos e os eventos que o bot deve enviar.':'Entre no sistema para configurar.';
@@ -67,7 +136,7 @@ window.openPage=openPage;
 document.addEventListener('click',event=>{if(event.target.closest('.nav-button[data-page="controle"]'))openPage('controle');});
 document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>openPage(button.dataset.page)));
 function renderAuth(){const signed=!!authUser;$('auth-user').hidden=!signed;$('logout').hidden=!signed;$('auth-user').textContent=signed?authUser.name||authUser.email:'';$('sync').hidden=signed;$('sync').textContent='Entrar';renderSettings();}
-if(!window.__controleModule){window.__controleModule=true;const script=document.createElement('script');script.src='/controle.js?v=20260919-4';document.body.append(script);}
+if(!window.__controleModule){window.__controleModule=true;const script=document.createElement('script');script.src='/controle.js?v=20260921-1';document.body.append(script);}
 function groups(){const map=new Map();for(const r of data.records){const key=r.tool||'Código não identificado';if(!map.has(key))map.set(key,[]);map.get(key).push(r);}for(const rows of map.values())rows.sort((a,b)=>sortDate(b).localeCompare(sortDate(a))||b.received.localeCompare(a.received));return map;}
 function latest(rows){const map=new Map();for(const r of rows){if(!map.has(r.sequence))map.set(r.sequence,r);}return [...map.values()];}
 function badge(s){return `<span class="badge ${esc(s)}">${esc(s)}</span>`;}

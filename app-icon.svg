@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Qualidade Tecnoperfil">
+  <rect width="512" height="512" rx="116" fill="#142D42"/>
+  <path d="M108 112h188c60 0 108 48 108 108s-48 108-108 108H229v72h-64v-136h131c25 0 44-19 44-44s-19-44-44-44H108z" fill="#fff"/>
+  <path d="M124 354h166c23 0 42 19 42 42s-19 42-42 42H124z" fill="#2DD4BF"/>
+  <circle cx="370" cy="358" r="38" fill="#2DD4BF"/>
+  <path d="m354 358 11 11 22-25" fill="none" stroke="#142D42" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

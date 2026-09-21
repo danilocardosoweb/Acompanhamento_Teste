@@ -1,7 +1,8 @@
-const TOOL_REGEX=/\b[A-Z]{2,4}-\d{3,6}[A-Z]?\b/i;
+const TOOL_REGEX=/\b(?:[A-Z]{2,4}|\d{2})-\d{3,6}[A-Z]?\b/i;
 const SYMMETRIC=/([Ø⌀Rr]?\s*-?\d+(?:[,.]\d+)?)\s*(?:mm)?\s*(?:±|\+\s*\/\s*-?)\s*(\d+(?:[,.]\d+)?)(?:\s*mm)?/gi;
 const ASYMMETRIC=/([Ø⌀Rr]?\s*-?\d+(?:[,.]\d+)?)\s*(?:mm)?\s*\+\s*(\d+(?:[,.]\d+)?)\s*\/\s*-\s*(\d+(?:[,.]\d+)?)(?:\s*mm)?/gi;
 const UNIT_VALUE=/([Ø⌀Rr]?\s*-?\d+(?:[,.]\d+)?)\s*mm\b/gi;
+const RADIUS_VALUE=/\bR\s*(\d+(?:[,.]\d+)?)(?![\w])/gi;
 const number=value=>Number(String(value).replace(',','.'));
 function buildLines(page){
  const sorted=[...page.items].sort((a,b)=>b.y-a.y||a.x-b.x),lines=[];
@@ -29,6 +30,11 @@ function detectDimensions(pages){
    const symmetricMatches=[...line.text.matchAll(SYMMETRIC)],asymmetricMatches=[...line.text.matchAll(ASYMMETRIC)];
    for(const match of symmetricMatches)matches.push({line,rawText:match[0].trim(),nominal:number(String(match[1]).replace(/[Ø⌀Rr]/g,'')),tolerancePlus:number(match[2]),toleranceMinus:number(match[2]),source:'PDF_TEXT',confidence:.99});
    for(const match of asymmetricMatches)matches.push({line,rawText:match[0].trim(),nominal:number(String(match[1]).replace(/[Ø⌀Rr]/g,'')),tolerancePlus:number(match[2]),toleranceMinus:number(match[3]),source:'PDF_TEXT',confidence:.97});
+   RADIUS_VALUE.lastIndex=0;
+   for(const match of line.text.matchAll(RADIUS_VALUE)){
+    const nominal=number(match[1]);
+    if(Number.isFinite(nominal)&&nominal>0&&nominal<=100)matches.push({line,rawText:`R${String(match[1]).replace('.',',')}`,locationText:match[0],nominal,tolerancePlus:null,toleranceMinus:null,symbol:'R',source:'PDF_TEXT_RADIUS',confidence:.86,status:'REVISAR',reviewReason:'Raio identificado pelo símbolo R. Confira o valor e a posição no desenho.'});
+   }
    if(!symmetricMatches.length&&!asymmetricMatches.length){
     const units=[...line.text.matchAll(UNIT_VALUE)];
     if(units.length>=2){
@@ -39,14 +45,14 @@ function detectDimensions(pages){
      if(Number.isFinite(nominal))matches.push({line,rawText:units[0][0].trim(),nominal,tolerancePlus:null,toleranceMinus:null,source:'PDF_TEXT',confidence:.82,status:'REVISAR'});
     }
    }
-   SYMMETRIC.lastIndex=0;ASYMMETRIC.lastIndex=0;UNIT_VALUE.lastIndex=0;
+   SYMMETRIC.lastIndex=0;ASYMMETRIC.lastIndex=0;UNIT_VALUE.lastIndex=0;RADIUS_VALUE.lastIndex=0;
   }
   const seen=new Set();
   for(const item of matches){
    const signature=`${page.page}|${item.rawText}|${item.line?.text||''}`;if(seen.has(signature))continue;seen.add(signature);
-   const point=locate(item.line?{items:item.line.items}:page,item.rawText),administrative=point.x>page.width*.72&&point.y<page.height*.22,symbol=/[Ø⌀Rr]/.test(item.rawText);
+   const point=locate(item.line?{items:item.line.items}:page,item.locationText||item.rawText),administrative=point.x>page.width*.72&&point.y<page.height*.22,symbol=item.symbol||(/[Ø⌀Rr]/.test(item.rawText)?item.rawText.trim()[0]:'');
    const confidence=administrative?.55:(symbol?Math.min(item.confidence,.96):item.confidence),status=administrative?'REVISAR':(item.status||'CONFIRMADO');
-   dimensions.push({id:`p${page.page}-${dimensions.length+1}`,rawText:item.rawText,nominal:item.nominal,tolerancePlus:item.tolerancePlus,toleranceMinus:item.toleranceMinus,symbol:symbol?item.rawText.trim()[0]:'',page:page.page,...point,confidence,source:item.source,status});
+   dimensions.push({id:`p${page.page}-${dimensions.length+1}`,rawText:item.rawText,nominal:item.nominal,tolerancePlus:item.tolerancePlus,toleranceMinus:item.toleranceMinus,symbol,reference:/\bREF\b/i.test(item.line?.text||''),page:page.page,...point,confidence,source:item.source,status,reviewReason:item.reviewReason});
   }
  }
  return dimensions;

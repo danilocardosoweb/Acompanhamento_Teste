@@ -19,7 +19,7 @@ function printable(value) {
 function validTolerance(nominal, plus, minus) {
   return Number.isFinite(nominal) && Number.isFinite(plus) && Number.isFinite(minus)
     && plus >= 0 && minus >= 0 && plus < nominal && minus < nominal
-    && plus <= Math.max(5, nominal * 0.35) && minus <= Math.max(5, nominal * 0.35);
+    && plus <= Math.max(0.2, nominal * 0.35) && minus <= Math.max(0.2, nominal * 0.35);
 }
 
 // CAD fonts are often read as #, %, or § where the drawing contains ±.
@@ -35,27 +35,43 @@ function normalizeTechnicalText(value) {
 }
 
 function parseDimension(value) {
+  const symbol = /[Ø⌀]/.test(String(value || '')) ? 'Ø' : '';
   const compact = normalizeTechnicalText(value);
   const asymmetric = compact.match(/^(\d+(?:[,.]\d+)?)(?:mm)?\+(\d+(?:[,.]\d+)?)(?:\/?-(\d+(?:[,.]\d+)?))$/i);
   if (asymmetric) {
     const nominal = number(asymmetric[1]), plus = number(asymmetric[2]), minus = number(asymmetric[3]);
-    if (validTolerance(nominal, plus, minus)) return { nominal, tolerancePlus: plus, toleranceMinus: minus, kind: 'ASYMMETRIC' };
+    if (validTolerance(nominal, plus, minus)) return { nominal, tolerancePlus: plus, toleranceMinus: minus, kind: 'ASYMMETRIC', ...(symbol ? { symbol } : {}) };
   }
   const symmetric = compact.match(/^(\d+(?:[,.]\d+)?)(?:mm)?(?:±|\+)(\d+(?:[,.]\d+)?)(?:mm)?$/i);
   if (symmetric) {
     const nominal = number(symmetric[1]), tolerance = number(symmetric[2]);
-    if (validTolerance(nominal, tolerance, tolerance)) return { nominal, tolerancePlus: tolerance, toleranceMinus: tolerance, kind: 'SYMMETRIC' };
+    if (validTolerance(nominal, tolerance, tolerance)) return { nominal, tolerancePlus: tolerance, toleranceMinus: tolerance, kind: 'SYMMETRIC', ...(symbol ? { symbol } : {}) };
   }
   const plain = compact.match(/^\d+(?:[,.]\d+)?$/);
-  if (plain) return { nominal: number(plain[0]), tolerancePlus: null, toleranceMinus: null, kind: 'PLAIN' };
+  if (plain) return { nominal: number(plain[0]), tolerancePlus: null, toleranceMinus: null, kind: 'PLAIN', ...(symbol ? { symbol } : {}) };
   return null;
+}
+
+function focusedOnlyForPage(options, pageNumber) {
+  if (options.focusedOnly !== true) return false;
+  return !(options.fullScanPages || []).some(page => Number(page) === Number(pageNumber));
+}
+
+function parseRadiusDimension(value, maxRadius = 100) {
+  const compact = String(value || '').replace(/[°]/g, '').replace(/[|]/g, '1').trim();
+  const match = compact.match(/\bR\s*(\d+(?:[,.]\d+)?)(?![A-Z0-9])/i);
+  if (!match) return null;
+  const nominal = number(match[1]);
+  if (!Number.isFinite(nominal) || nominal <= 0 || nominal > maxRadius) return null;
+  return { nominal, tolerancePlus: null, toleranceMinus: null, kind: 'RADIUS', symbol: 'R' };
 }
 
 function parseCompactSymmetric(value) {
   const compact = normalizeTechnicalText(value);
   // Typical OCR recovery: 1,6±0,15 becomes 1,60,15; 8,3±0,2 becomes
-  // 8,310,2. The optional 1 is a fragment of the original ± glyph.
-  let match = compact.match(/^(\d+(?:[,.]\d{1,2}?))(?:1)?0[,.](\d{1,2})$/);
+  // 8,310,2. A stray digit can also be read from profile edges next to ±,
+  // e.g. 1,78±0,15 -> 1,7840,15. The tolerance bounds keep this recovery safe.
+  let match = compact.match(/^(\d+(?:[,.]\d{1,2}?))(?:[1-9])?0[,.](\d{1,2})$/);
   if (match) {
     const nominal = number(match[1]), tolerance = number(`0,${match[2]}`);
     if (validTolerance(nominal, tolerance, tolerance)) return { nominal, tolerancePlus: tolerance, toleranceMinus: tolerance, kind: 'SYMMETRIC_COMPACT' };
@@ -69,6 +85,22 @@ function parseCompactSymmetric(value) {
   return null;
 }
 
+function parseNearbyDimension(value) {
+  const direct = parseRadiusDimension(value, 25) || parseDimension(value);
+  if (direct && direct.kind !== 'PLAIN') return direct;
+  // Only use this ambiguous recovery inside a crop anchored to another known
+  // dimension. For example, OCR may flatten "6 ± 0,13" into "60,13".
+  return parseCompactSymmetric(value) || direct;
+}
+
+function isDimensionInk(red, green, blueChannel) {
+  const blueInk = blueChannel > red + 35 && blueChannel > green + 22;
+  const darkest = Math.min(red, green, blueChannel);
+  const lightest = Math.max(red, green, blueChannel);
+  const neutralDarkInk = lightest < 210 && lightest - darkest < 48;
+  return blueInk || neutralDarkInk;
+}
+
 function buildBlueTextMask(context) {
   const image = context.getImageData(0, 0, context.canvas.width, context.canvas.height);
   const { width, height, data } = image;
@@ -76,9 +108,11 @@ function buildBlueTextMask(context) {
 
   for (let index = 0; index < blue.length; index += 1) {
     const offset = index * 4;
-    // The technical dimensions in our drawings are blue. Keeping this layer
-    // removes the black profile geometry and the tolerance table.
-    if (data[offset + 2] > data[offset] + 35 && data[offset + 2] > data[offset + 1] + 22) blue[index] = 1;
+    // Drawings do not use a consistent color convention: some have blue
+    // dimensions over black/blue geometry, while others (such as DIN-004)
+    // have black dimensions over a blue profile. Keep both blue ink and
+    // neutral dark ink, then remove long construction lines below.
+    if (isDimensionInk(data[offset], data[offset + 1], data[offset + 2])) blue[index] = 1;
   }
 
   // Extension lines are much longer than a character. Delete only long
@@ -242,15 +276,18 @@ function isBalloonToken(context, box) {
 function makeCandidate(parsed, rawText, box, page, angle, originalHeight, confidence, reason) {
   const original = originalBox(box, angle, originalHeight);
   const symmetric = parsed.tolerancePlus !== null && Math.abs(parsed.tolerancePlus - parsed.toleranceMinus) < 1e-9;
-  const canonical = parsed.tolerancePlus === null
-    ? printable(parsed.nominal)
-    : `${printable(parsed.nominal)}${symmetric ? ' ± ' : ' +'}${printable(parsed.tolerancePlus)}${symmetric ? '' : ` / -${printable(parsed.toleranceMinus)}`}`;
+  const canonical = parsed.kind === 'RADIUS'
+    ? `R${printable(parsed.nominal)}`
+    : `${parsed.symbol === 'Ø' ? 'Ø' : ''}${parsed.tolerancePlus === null
+      ? printable(parsed.nominal)
+      : `${printable(parsed.nominal)}${symmetric ? ' ± ' : ' +'}${printable(parsed.tolerancePlus)}${symmetric ? '' : ` / -${printable(parsed.toleranceMinus)}`}`}`;
   return {
     rawText: canonical,
     recognizedText: canonical,
     nominal: parsed.nominal,
     tolerancePlus: parsed.tolerancePlus,
     toleranceMinus: parsed.toleranceMinus,
+    symbol: parsed.symbol || '',
     page,
     x: original.x0 / SCALE,
     y: (originalHeight - original.y1) / SCALE,
@@ -258,6 +295,7 @@ function makeCandidate(parsed, rawText, box, page, angle, originalHeight, confid
     height: (original.y1 - original.y0) / SCALE,
     rotation: angle,
     confidence: Math.max(0, Math.min(.98, confidence)),
+    dimensionType: parsed.kind === 'RADIUS' ? 'RADIUS' : 'LINEAR',
     source: 'OCR_LAB',
     status: 'REVISAR',
     reviewReason: reason,
@@ -288,11 +326,142 @@ function nearbyCompound(words, index) {
   return { parsed, rawText: assembled, bbox: { x0: Math.min(...boxes.map(item => item.x0)), y0: Math.min(...boxes.map(item => item.y0)), x1: Math.max(...boxes.map(item => item.x1)), y1: Math.max(...boxes.map(item => item.y1)) }, confidence: Math.min(base.confidence, plus.word.confidence, minus?.word.confidence ?? 100) / 100 };
 }
 
+function nearbyRadius(words, index) {
+  const base = words[index];
+  if (!/^R$/i.test(String(base?.text || '').trim())) return null;
+  const origin = center(base.bbox), height = Math.max(12, base.bbox.y1 - base.bbox.y0);
+  const candidate = words.map((word, candidateIndex) => ({ word, candidateIndex, center: center(word.bbox), parsed: parseDimension(word.text) }))
+    .filter(item => item.candidateIndex !== index && item.parsed?.kind === 'PLAIN'
+      && item.parsed.nominal > 0 && item.parsed.nominal <= 25
+      && item.center.x > origin.x && item.center.x - origin.x <= height * 4
+      && Math.abs(item.center.y - origin.y) <= height * 1.5)
+    .sort((a, b) => Math.hypot(a.center.x - origin.x, a.center.y - origin.y) - Math.hypot(b.center.x - origin.x, b.center.y - origin.y))[0];
+  if (!candidate) return null;
+  const parsed = { nominal: candidate.parsed.nominal, tolerancePlus: null, toleranceMinus: null, kind: 'RADIUS', symbol: 'R' };
+  return { parsed, bbox: { x0: Math.min(base.bbox.x0, candidate.word.bbox.x0), y0: Math.min(base.bbox.y0, candidate.word.bbox.y0), x1: Math.max(base.bbox.x1, candidate.word.bbox.x1), y1: Math.max(base.bbox.y1, candidate.word.bbox.y1) }, confidence: Math.min(base.confidence, candidate.word.confidence) / 100 };
+}
+
+async function scanNearDetectedDimensions(document, worker, surface, all, pageNumber) {
+  // Sample the page by region, preferring linear/toleranced dimensions over
+  // radii. A page with many radius callouts must not spend every recovery crop
+  // around those callouts and miss the profile's other dimensions.
+  const pageItems = all.filter(item => item.page === pageNumber && Number.isFinite(Number(item.x)));
+  const ranked = pageItems.sort((a, b) => {
+    const score = item => item.symbol === 'R' ? 2 : item.tolerancePlus !== null || item.toleranceMinus !== null ? 0 : 1;
+    return score(a) - score(b) || b.confidence - a.confidence;
+  });
+  const anchors = [];
+  const occupiedCells = new Set();
+  for (const item of ranked) {
+    const cell = `${Math.min(2, Math.floor((item.x + (item.width || 0) / 2) / Math.max(1, surface.canvas.width / SCALE) * 3))}:${Math.min(2, Math.floor((item.y + (item.height || 0) / 2) / Math.max(1, surface.canvas.height / SCALE) * 3))}`;
+    if (occupiedCells.has(cell)) continue;
+    occupiedCells.add(cell);
+    anchors.push(item);
+    if (anchors.length >= 9) break;
+  }
+  const scanned = new Set();
+  for (const anchor of anchors) {
+    const signature = `${Math.round(anchor.x)}|${Math.round(anchor.y)}`;
+    if (scanned.has(signature)) continue;
+    scanned.add(signature);
+    const marginX = Math.max(180, Math.min(240, Math.max(anchor.width || 0, anchor.height || 0) * 8));
+    const marginY = Math.max(100, Math.min(150, Math.max(anchor.width || 0, anchor.height || 0) * 5));
+    const region = {
+      x0: Math.max(0, Math.floor((anchor.x - marginX) * SCALE)),
+      x1: Math.min(surface.canvas.width, Math.ceil((anchor.x + anchor.width + marginX) * SCALE)),
+      y0: Math.max(0, Math.floor(surface.canvas.height - (anchor.y + anchor.height + marginY) * SCALE)),
+      y1: Math.min(surface.canvas.height, Math.ceil(surface.canvas.height - (anchor.y - marginY) * SCALE)),
+    };
+    if (region.x1 <= region.x0 || region.y1 <= region.y0) continue;
+    const focused = crop(document.canvasFactory, surface.canvas, region, 0);
+    const scale = 2;
+    const enlarged = document.canvasFactory.create(focused.canvas.width * scale, focused.canvas.height * scale);
+    enlarged.context.imageSmoothingEnabled = false;
+    enlarged.context.drawImage(focused.canvas, 0, 0, focused.canvas.width, focused.canvas.height, 0, 0, enlarged.canvas.width, enlarged.canvas.height);
+    try {
+      for (const psm of [11, 6]) {
+        await worker.setParameters({ tessedit_pageseg_mode: String(psm), tessedit_char_whitelist: '0123456789.,+-±Rr' });
+        const { data } = await worker.recognize(enlarged.canvas.toBuffer('image/png'), {}, { blocks: true, text: true });
+        const lines = (data.blocks || []).flatMap(block => (block.paragraphs || []).flatMap(paragraph => paragraph.lines || []));
+        for (const line of lines) {
+          if (!line.bbox) continue;
+          const text = String(line.text || '').trim();
+          const parsed = parseNearbyDimension(text);
+          if (!parsed) continue;
+          if (parsed.kind === 'PLAIN' && (parsed.nominal < .5 || parsed.nominal > 500)) continue;
+          const box = { x0: region.x0 + line.bbox.x0 / scale, y0: region.y0 + line.bbox.y0 / scale, x1: region.x0 + line.bbox.x1 / scale, y1: region.y0 + line.bbox.y1 / scale };
+          const reason = parsed.kind === 'RADIUS'
+            ? 'Raio identificado pelo símbolo R em uma região ampliada. Confira a leitura.'
+            : parsed.kind === 'PLAIN'
+              ? 'Cota linear sem tolerância recuperada em uma região ampliada. Confira a associação com as linhas de cota.'
+            : parsed.kind === 'SYMMETRIC_COMPACT'
+              ? 'Tolerância simétrica reconstruída em uma região ampliada. Confira a leitura.'
+              : 'Cota técnica adicional lida perto de outra cota. Confira a posição no desenho.';
+          const candidate = makeCandidate(parsed, text, box, pageNumber, 0, surface.canvas.height, Number(line.confidence || data.confidence || 0) / 100, reason);
+          if (parsed.kind === 'PLAIN') candidate.confidence = Math.min(candidate.confidence, .65);
+          all.push(candidate);
+        }
+      }
+    } finally {
+      document.canvasFactory.destroy(enlarged);
+      document.canvasFactory.destroy(focused);
+    }
+  }
+}
+
+function shouldRunNeighborhoodRecovery({ flatBarRecovery = false, pageDimensionCount = 0, radiusCount = 0, linearCount = 0 } = {}) {
+  return flatBarRecovery || pageDimensionCount < 5 || (radiusCount >= 3 && linearCount < radiusCount);
+}
+
+async function scanFlatBarFineTiles(document, worker, surface, all, pageNumber) {
+  // A few legacy BC sheets have garbled vector text and very small dimensions
+  // embedded in the page image. Only invoke this slower recovery when the
+  // normal page and neighborhood passes found nothing.
+  for (const angle of [0, 90]) {
+    const view = rotate(document.canvasFactory, surface.canvas, angle);
+    const overlap = Math.max(36, Math.round(Math.min(view.width, view.height) * .025));
+    const tileWidth = Math.ceil(view.width / 4), tileHeight = Math.ceil(view.height / 4);
+    for (let row = 0; row < 4; row += 1) for (let column = 0; column < 4; column += 1) {
+      const tile = {
+        x0: Math.max(0, column * tileWidth - overlap),
+        y0: Math.max(0, row * tileHeight - overlap),
+        x1: Math.min(view.width, (column + 1) * tileWidth + overlap),
+        y1: Math.min(view.height, (row + 1) * tileHeight + overlap),
+      };
+      const focused = crop(document.canvasFactory, view.canvas, tile, 0);
+      try {
+        for (const psm of (angle === 0 ? [11, 6] : [11])) {
+          await worker.setParameters({ tessedit_pageseg_mode: String(psm), tessedit_char_whitelist: '0123456789.,+-±Rr' });
+          const { data } = await worker.recognize(focused.canvas.toBuffer('image/png'), {}, { blocks: true, text: true });
+          const lines = (data.blocks || []).flatMap(block => (block.paragraphs || []).flatMap(paragraph => paragraph.lines || []));
+          for (const line of lines) {
+            if (!line.bbox) continue;
+            const text = String(line.text || '').trim();
+            const parsed = parseNearbyDimension(text);
+            if (!parsed || parsed.kind === 'PLAIN') continue;
+            const box = { x0: tile.x0 + line.bbox.x0, y0: tile.y0 + line.bbox.y0, x1: tile.x0 + line.bbox.x1, y1: tile.y0 + line.bbox.y1 };
+            const reason = parsed.kind === 'RADIUS'
+              ? 'Raio candidato localizado na varredura ampliada da barra. Confira no desenho.'
+              : parsed.kind === 'SYMMETRIC_COMPACT'
+                ? 'Tolerância reconstruída na varredura ampliada da barra. Confira no desenho.'
+                : 'Cota localizada na varredura ampliada da barra. Confira no desenho.';
+            all.push(makeCandidate(parsed, text, box, pageNumber, angle, surface.canvas.height, Number(line.confidence || data.confidence || 0) / 100, reason));
+          }
+        }
+      } finally {
+        document.canvasFactory.destroy(focused);
+      }
+    }
+    if (view.owned) document.canvasFactory.destroy(view.surface);
+  }
+}
+
 function distinct(candidates) {
   const accepted = [];
   for (const candidate of candidates.sort((a, b) => b.confidence - a.confidence)) {
     const duplicate = accepted.some(other => other.page === candidate.page
       && Math.hypot(other.x - candidate.x, other.y - candidate.y) < 14
+      && String(other.symbol || '') === String(candidate.symbol || '')
       && Math.abs(other.nominal - candidate.nominal) < .1
       && (other.tolerancePlus ?? null) === (candidate.tolerancePlus ?? null)
       && (other.toleranceMinus ?? null) === (candidate.toleranceMinus ?? null));
@@ -314,6 +483,7 @@ async function extractLabDimensions(buffer, options = {}) {
     const maxPages = Math.min(document.numPages, Math.max(1, Math.min(MAX_PAGES, Number(options.maxPages) || MAX_PAGES)));
     worker = await createWorker('eng', 1, { cachePath });
     for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
+      const focusedOnlyPage = focusedOnlyForPage(options, pageNumber);
       const page = await document.getPage(pageNumber);
       const viewport = page.getViewport({ scale: SCALE });
       if (viewport.width * viewport.height > 32000000) throw Error('Página grande demais para a leitura experimental.');
@@ -331,7 +501,7 @@ async function extractLabDimensions(buffer, options = {}) {
         try {
           const readings = [];
           let focusedDimension = null;
-          for (const psm of options.focusedOnly ? [6] : [6, 11]) {
+          for (const psm of focusedOnlyPage ? [6] : [6, 11]) {
             await worker.setParameters({ tessedit_pageseg_mode: String(psm), tessedit_char_whitelist: '0123456789.,+-±' });
             const { data } = await worker.recognize(focused.canvas.toBuffer('image/png'), {}, { blocks: true, text: true });
             readings.push(String(data.text || ''));
@@ -380,7 +550,7 @@ async function extractLabDimensions(buffer, options = {}) {
         }
       }
 
-      if (options.focusedOnly) {
+      if (focusedOnlyPage) {
         document.canvasFactory.destroy(surface);
         continue;
       }
@@ -418,6 +588,15 @@ async function extractLabDimensions(buffer, options = {}) {
         }
       }
 
+      const pageDimensionCount = distinct(all.filter(item => item.page === pageNumber)).length;
+      const pageItems = all.filter(item => item.page === pageNumber);
+      const radiusCount = pageItems.filter(item => item.symbol === 'R' || item.dimensionType === 'RADIUS').length;
+      const linearCount = pageItems.length - radiusCount;
+      if (options.focusedNeighbors && shouldRunNeighborhoodRecovery({ flatBarRecovery: options.flatBarRecovery, pageDimensionCount, radiusCount, linearCount })) {
+        await scanNearDetectedDimensions(document, worker, surface, all, pageNumber);
+      }
+      if (options.flatBarRecovery && !all.some(item => item.page === pageNumber)) await scanFlatBarFineTiles(document, worker, surface, all, pageNumber);
+
       for (const angle of [0, 90]) {
         const view = rotate(document.canvasFactory, surface.canvas, angle);
         for (const psm of [11, 6]) {
@@ -429,12 +608,18 @@ async function extractLabDimensions(buffer, options = {}) {
           // geometric unit for CAD text, so they are a safe fallback.
           const sourceTokens = data.words?.length ? data.words : lines;
           const words = sourceTokens
-            .filter(word => /\d/.test(word.text || '') && word.bbox)
+            .filter(word => (/\d/.test(word.text || '') || /^R$/i.test(String(word.text || '').trim())) && word.bbox)
             .map(word => ({ text: String(word.text).trim(), bbox: word.bbox, confidence: Number(word.confidence || 0) }));
           for (let index = 0; index < words.length; index += 1) {
             const word = words[index];
-            const parsed = parseDimension(word.text);
-            const compound = parsed?.kind === 'PLAIN' ? nearbyCompound(words, index) : null;
+            const radius = parseRadiusDimension(word.text, 25);
+            const splitRadius = !radius ? nearbyRadius(words, index) : null;
+            if (splitRadius) {
+              all.push(makeCandidate(splitRadius.parsed, `R${printable(splitRadius.parsed.nominal)}`, splitRadius.bbox, pageNumber, angle, surface.canvas.height, splitRadius.confidence, 'Raio identificado pelo símbolo R e pelo número adjacente. Confira a leitura.'));
+              continue;
+            }
+            const parsed = radius || parseDimension(word.text);
+            const compound = !radius && parsed?.kind === 'PLAIN' ? nearbyCompound(words, index) : null;
             if (compound) {
               all.push(makeCandidate(compound.parsed, compound.rawText, compound.bbox, pageNumber, angle, surface.canvas.height, compound.confidence, 'Tolerância agrupada pela posição no desenho. Confira a leitura.'));
               continue;
@@ -451,7 +636,9 @@ async function extractLabDimensions(buffer, options = {}) {
               if ((isInteger && parsed.nominal <= 99) && isBalloonToken(view.surface?.context || surface.context, word.bbox)) continue;
               if (isInteger && parsed.nominal <= 12) continue;
             }
-            const reason = parsed.kind === 'PLAIN'
+            const reason = parsed.kind === 'RADIUS'
+              ? 'Raio identificado pelo símbolo R. Confira o valor e a posição no desenho.'
+              : parsed.kind === 'PLAIN'
               ? 'Cota sem tolerância explícita. Confira no desenho.'
               : 'Leitura técnica pela posição de nominal e tolerância. Confira no desenho.';
             all.push(makeCandidate(parsed, word.text, word.bbox, pageNumber, angle, surface.canvas.height, word.confidence / 100, reason));
@@ -465,7 +652,8 @@ async function extractLabDimensions(buffer, options = {}) {
     await worker?.terminate();
     await document.destroy();
   }
-  return distinct(all).map((candidate, index) => ({ ...candidate, id: `lab-${candidate.page}-${index + 1}` }));
+  const result = distinct(all).map((candidate, index) => ({ ...candidate, id: `lab-${candidate.page}-${index + 1}` }));
+  return result;
 }
 
-module.exports = { extractLabDimensions, parseDimension, parseCompactSymmetric, normalizeTechnicalText };
+module.exports = { extractLabDimensions, parseDimension, parseRadiusDimension, parseCompactSymmetric, parseNearbyDimension, normalizeTechnicalText, focusedOnlyForPage, shouldRunNeighborhoodRecovery, isDimensionInk };

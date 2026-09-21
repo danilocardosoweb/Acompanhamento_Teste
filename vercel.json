@@ -14,6 +14,8 @@
     { "src": "index.html", "use": "@vercel/static" },
     { "src": "*.js", "use": "@vercel/static" },
     { "src": "*.css", "use": "@vercel/static" },
+    { "src": "manifest.webmanifest", "use": "@vercel/static" },
+    { "src": "*.svg", "use": "@vercel/static" },
     { "src": "vendor/**", "use": "@vercel/static" }
   ],
   "routes": [
