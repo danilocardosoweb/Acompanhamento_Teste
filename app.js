@@ -136,7 +136,7 @@ window.openPage=openPage;
 document.addEventListener('click',event=>{if(event.target.closest('.nav-button[data-page="controle"]'))openPage('controle');});
 document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>openPage(button.dataset.page)));
 function renderAuth(){const signed=!!authUser;$('auth-user').hidden=!signed;$('logout').hidden=!signed;$('auth-user').textContent=signed?authUser.name||authUser.email:'';$('sync').hidden=signed;$('sync').textContent='Entrar';renderSettings();}
-if(!window.__controleModule){window.__controleModule=true;const script=document.createElement('script');script.src='/controle.js?v=20260921-1';document.body.append(script);}
+if(!window.__controleModule){window.__controleModule=true;const script=document.createElement('script');script.src='/controle.js?v=20260921-2';document.body.append(script);}
 function groups(){const map=new Map();for(const r of data.records){const key=r.tool||'Código não identificado';if(!map.has(key))map.set(key,[]);map.get(key).push(r);}for(const rows of map.values())rows.sort((a,b)=>sortDate(b).localeCompare(sortDate(a))||b.received.localeCompare(a.received));return map;}
 function latest(rows){const map=new Map();for(const r of rows){if(!map.has(r.sequence))map.set(r.sequence,r);}return [...map.values()];}
 function badge(s){return `<span class="badge ${esc(s)}">${esc(s)}</span>`;}

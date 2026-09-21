@@ -455,3 +455,169 @@ body.app-touch .app-mode-actions{display:flex}
 @media(max-width:430px){
  body.app-touch header{padding-right:94px}
 }
+/* Conferência visual da cota durante o controle dimensional */
+.controle-measurement-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 16px;
+  align-items: start;
+}
+
+.controle-drawing-reference {
+  position: sticky;
+  top: 16px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #b8dfd9;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f9ffff 0%, #eef8f7 100%);
+  box-shadow: 0 8px 22px rgba(10, 92, 99, .08);
+}
+
+.controle-drawing-reference-head,
+.controle-dimension-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.controle-drawing-reference-head span,
+.controle-dimension-preview-head span {
+  color: #008f87;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .09em;
+}
+
+.controle-drawing-reference-head strong,
+.controle-dimension-preview-head strong {
+  color: #12304f;
+  font-size: .88rem;
+}
+
+.controle-drawing-reference-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 175px;
+  margin: 10px 0 8px;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid #cce5e2;
+  border-radius: 9px;
+  background: repeating-conic-gradient(#edf4f4 0 25%, #e6eeee 0 50%) 50% / 16px 16px;
+  color: #527187;
+  cursor: zoom-in;
+}
+
+.controle-drawing-reference-preview:disabled {
+  cursor: default;
+}
+
+.controle-drawing-reference-preview img {
+  display: block;
+  width: 100%;
+  max-height: 205px;
+  object-fit: contain;
+}
+
+.controle-drawing-reference-preview i {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border-radius: 50%;
+  background: #008f87;
+  color: #fff;
+  font-size: 1.1rem;
+  font-style: normal;
+  box-shadow: 0 2px 8px rgba(0, 95, 91, .28);
+}
+
+.controle-drawing-reference-empty {
+  max-width: 170px;
+  text-align: center;
+  font-size: .82rem;
+  line-height: 1.35;
+}
+
+.controle-drawing-reference small {
+  display: block;
+  color: #587187;
+  font-size: .76rem;
+  line-height: 1.35;
+}
+
+.controle-measurement.is-active {
+  background: #f4fbfa;
+  box-shadow: inset 3px 0 #008f87;
+}
+
+.controle-dimension-preview-dialog {
+  width: min(92vw, 780px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #abd9d4;
+  border-radius: 14px;
+  box-shadow: 0 22px 70px rgba(9, 36, 58, .3);
+}
+
+.controle-dimension-preview-dialog::backdrop {
+  background: rgba(8, 29, 47, .48);
+}
+
+.controle-dimension-preview-head {
+  padding: 14px 16px;
+  background: #f5fbfb;
+}
+
+.controle-dimension-preview-dialog img {
+  display: block;
+  width: 100%;
+  max-height: 72dvh;
+  object-fit: contain;
+  background: repeating-conic-gradient(#edf4f4 0 25%, #e6eeee 0 50%) 50% / 18px 18px;
+}
+
+@media (max-width: 1050px) {
+  .controle-measurement-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .controle-drawing-reference {
+    position: static;
+    order: -1;
+    display: grid;
+    grid-template-columns: minmax(150px, .9fr) minmax(210px, 1.4fr);
+    gap: 8px 14px;
+    align-items: center;
+  }
+
+  .controle-drawing-reference-head,
+  .controle-drawing-reference small {
+    grid-column: 1 / -1;
+  }
+
+  .controle-drawing-reference-preview {
+    grid-row: 2 / span 2;
+    min-height: 140px;
+    margin: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .controle-drawing-reference {
+    display: block;
+  }
+
+  .controle-drawing-reference-preview {
+    min-height: 175px;
+    margin: 10px 0 8px;
+  }
+}

@@ -1,4 +1,4 @@
-const CACHE_NAME='qualidade-shell-20260921';
+const CACHE_NAME='qualidade-shell-20260921-2';
 const APP_SHELL=['/','/index.html','/style.css','/app.js','/knowledge.js','/corrections.js','/drawing.js','/indicators.js','/fep.js','/preview.js','/revision-tools.js','/draw2data.js','/controle.js','/whatsapp-settings.js','/manifest.webmanifest','/app-icon.svg'];
 
 self.addEventListener('install',event=>{

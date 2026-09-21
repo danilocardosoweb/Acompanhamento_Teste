@@ -20,9 +20,10 @@ function controlDimensions(value){
  const rows=Array.isArray(value)?value:[];
  if(!rows.length||rows.length>500)throw Error('O perfil precisa conter entre 1 e 500 cotas.');
  return rows.map((item,index)=>{
-  const nominal=Number(item?.nominal),plus=item?.tolerancePlus==null||item.tolerancePlus===''?null:Number(item.tolerancePlus),minus=item?.toleranceMinus==null||item.toleranceMinus===''?null:Number(item.toleranceMinus);
+  const nominal=Number(item?.nominal),plus=item?.tolerancePlus==null||item.tolerancePlus===''?null:Number(item.tolerancePlus),minus=item?.toleranceMinus==null||item.toleranceMinus===''?null:Number(item.toleranceMinus),page=Number(item?.page),x=Number(item?.x),y=Number(item?.y),width=Number(item?.width),height=Number(item?.height);
   if(!Number.isFinite(nominal)||nominal<0||nominal>100000||plus!==null&&(!Number.isFinite(plus)||plus<0||plus>100000)||minus!==null&&(!Number.isFinite(minus)||minus<0||minus>100000))throw Error(`Cota ${index+1} inválida.`);
-  return {...item,id:cleanText(item?.id||`${index+1}`,100),rawText:cleanText(item?.rawText||String(nominal),300),nominal,tolerancePlus:plus,toleranceMinus:minus};
+  const {page:ignoredPage,x:ignoredX,y:ignoredY,width:ignoredWidth,height:ignoredHeight,...rest}=item||{},located=Number.isInteger(page)&&page>0&&page<=100&&[x,y,width,height].every(Number.isFinite)&&x>=0&&y>=0&&width>0&&height>0&&x<=20000&&y<=20000&&width<=20000&&height<=20000;
+  return {...rest,id:cleanText(item?.id||`${index+1}`,100),rawText:cleanText(item?.rawText||String(nominal),300),nominal,tolerancePlus:plus,toleranceMinus:minus,...(located?{page,x,y,width,height}:{})};
  });
 }
 const profileRow=row=>({id:row.id,tool:row.tool,sequence:row.sequence,revision:row.revision,name:row.name,dimensions:row.dimensions,drawingPath:row.drawing_path,active:row.active,createdAt:row.created_at,updatedAt:row.updated_at});

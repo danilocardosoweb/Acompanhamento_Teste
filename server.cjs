@@ -115,6 +115,7 @@ const server = http.createServer((req,res) => {
       try {(url.searchParams.get('kind')==='correction'?correctionPreview(url):preview(url)).then(result=>json(res,200,result)).catch(e=>json(res,500,{error:e.message}));}catch(e){json(res,400,{error:e.message});}
       return;
     }
+    const controlSnapshotMatch=url.pathname.match(/^\/api\/control-profiles\/([0-9a-f-]+)\/snapshot$/i);if(controlSnapshotMatch){readBody(req,32768).then(async body=>{try{const input=JSON.parse(body),profile=readControlDb().profiles.find(p=>p.id===controlSnapshotMatch[1]);if(!profile?.drawingPath)throw Error('Desenho não associado a este perfil.');const file=path.resolve(root,profile.drawingPath),folder=path.join(root,'dados','controle-desenhos')+path.sep;if(!file.startsWith(folder)||!fs.existsSync(file))throw Error('Desenho não encontrado.');const image=await renderDimensionSnapshot(fs.readFileSync(file),input.dimension);json(res,200,{page:image.page,width:image.width,height:image.height,data:image.bytes.toString('base64')});}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
     return json(res,404,{});
   }
   if(req.method !== 'GET') return json(res,405,{});
