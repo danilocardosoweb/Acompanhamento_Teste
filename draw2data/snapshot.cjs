@@ -1,11 +1,13 @@
+const { loadPdfJs } = require('./pdfjs.cjs');
+
 async function renderDimensionSnapshot(bytes, dimension) {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjs = await loadPdfJs();
   const pageNumber = Math.round(Number(dimension?.page));
   const x = Number(dimension?.x), y = Number(dimension?.y), width = Number(dimension?.width), height = Number(dimension?.height);
   if (!Number.isInteger(pageNumber) || pageNumber < 1 || ![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0) {
     throw Error('Esta cota não possui uma posição segura no desenho.');
   }
-  const document = await pdfjs.getDocument({ data: new Uint8Array(bytes) }).promise;
+  const document = await pdfjs.getDocument({ data: new Uint8Array(bytes), disableWorker: true, useSystemFonts: true }).promise;
   try {
     if (pageNumber > document.numPages) throw Error('Página da cota não encontrada no PDF.');
     const page = await document.getPage(pageNumber);
@@ -32,6 +34,13 @@ async function renderDimensionSnapshot(bytes, dimension) {
         crop.context.lineWidth = 4;
         crop.context.fillRect(markerX - 6, markerY - 6, width * scale + 12, height * scale + 12);
         crop.context.strokeRect(markerX - 6, markerY - 6, width * scale + 12, height * scale + 12);
+        if (dimension.debug && dimension.geometryEvidence?.line) {
+          const line = dimension.geometryEvidence.line, labScale = 5, cropTop = pageHeight - top;
+          crop.context.save();
+          crop.context.strokeStyle = '#7c3aed'; crop.context.lineWidth = 3; crop.context.setLineDash([8, 5]);
+          crop.context.beginPath(); crop.context.moveTo((line.x0 / labScale - left) * scale, (line.y0 / labScale - cropTop) * scale); crop.context.lineTo((line.x1 / labScale - left) * scale, (line.y1 / labScale - cropTop) * scale); crop.context.stroke();
+          crop.context.setLineDash([]); crop.context.fillStyle = '#7c3aed'; crop.context.font = 'bold 16px sans-serif'; crop.context.fillText(`${dimension.decisionClassification || 'REVIEW'} ${Math.round(Number(dimension.dimensionScore || 0))}%`, 10, 22); crop.context.restore();
+        }
         const image = crop.canvas.toBuffer('image/png');
         return { bytes: image, page: pageNumber, width: cropWidth, height: cropHeight };
       } finally {
@@ -45,4 +54,28 @@ async function renderDimensionSnapshot(bytes, dimension) {
   }
 }
 
-module.exports = { renderDimensionSnapshot };
+async function renderPdfPageImage(bytes, requestedPage) {
+  const pdfjs = await loadPdfJs();
+  const pageNumber = Math.round(Number(requestedPage));
+  if (!Number.isInteger(pageNumber) || pageNumber < 1) throw Error('Página inválida.');
+  const document = await pdfjs.getDocument({ data: new Uint8Array(bytes), disableWorker: true, useSystemFonts: true }).promise;
+  try {
+    if (pageNumber > document.numPages) throw Error('Página não encontrada no PDF.');
+    const page = await document.getPage(pageNumber);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(1.6, 2000 / Math.max(base.width, base.height));
+    const viewport = page.getViewport({ scale });
+    if (viewport.width * viewport.height > 14000000) throw Error('Página grande demais para abrir na seleção.');
+    const canvas = document.canvasFactory.create(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    try {
+      await page.render({ canvasContext: canvas.context, viewport }).promise;
+      return { bytes: canvas.canvas.toBuffer('image/png'), page: pageNumber, pageWidth: base.width, pageHeight: base.height, width: canvas.canvas.width, height: canvas.canvas.height };
+    } finally {
+      document.canvasFactory.destroy(canvas);
+    }
+  } finally {
+    await document.destroy();
+  }
+}
+
+module.exports = { renderDimensionSnapshot, renderPdfPageImage };

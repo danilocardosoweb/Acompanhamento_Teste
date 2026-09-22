@@ -33,19 +33,22 @@ function normalizeTechnicalText(value) {
 }
 
 function parseDimension(value) {
-  const compact = normalizeTechnicalText(value);
+  const source = String(value || '').replace(/\s+/g, '');
+  const symbolMatch = source.match(/^([RrØ⌀])/);
+  const symbol = symbolMatch ? symbolMatch[1].toUpperCase() : '';
+  const compact = normalizeTechnicalText(value).replace(/^R/i, '');
   const asymmetric = compact.match(/^(\d+(?:[,.]\d+)?)(?:mm)?\+(\d+(?:[,.]\d+)?)(?:\/?-(\d+(?:[,.]\d+)?))$/i);
   if (asymmetric) {
     const nominal = number(asymmetric[1]), plus = number(asymmetric[2]), minus = number(asymmetric[3]);
-    if (validTolerance(nominal, plus, minus)) return { nominal, tolerancePlus: plus, toleranceMinus: minus, kind: 'ASYMMETRIC' };
+    if (validTolerance(nominal, plus, minus)) return { nominal, tolerancePlus: plus, toleranceMinus: minus, kind: 'ASYMMETRIC', ...(symbol ? { symbol, dimensionType: symbol === 'R' ? 'RADIUS' : 'DIAMETER' } : {}) };
   }
   const symmetric = compact.match(/^(\d+(?:[,.]\d+)?)(?:mm)?(?:±|\+)(\d+(?:[,.]\d+)?)(?:mm)?$/i);
   if (symmetric) {
     const nominal = number(symmetric[1]), tolerance = number(symmetric[2]);
-    if (validTolerance(nominal, tolerance, tolerance)) return { nominal, tolerancePlus: tolerance, toleranceMinus: tolerance, kind: 'SYMMETRIC' };
+    if (validTolerance(nominal, tolerance, tolerance)) return { nominal, tolerancePlus: tolerance, toleranceMinus: tolerance, kind: 'SYMMETRIC', ...(symbol ? { symbol, dimensionType: symbol === 'R' ? 'RADIUS' : 'DIAMETER' } : {}) };
   }
   const plain = compact.match(/^\d+(?:[,.]\d+)?$/);
-  if (plain) return { nominal: number(plain[0]), tolerancePlus: null, toleranceMinus: null, kind: 'PLAIN' };
+  if (plain) return { nominal: number(plain[0]), tolerancePlus: null, toleranceMinus: null, kind: 'PLAIN', ...(symbol ? { symbol, dimensionType: symbol === 'R' ? 'RADIUS' : 'DIAMETER' } : {}) };
   return null;
 }
 
@@ -249,6 +252,8 @@ function makeCandidate(parsed, rawText, box, page, angle, originalHeight, confid
     nominal: parsed.nominal,
     tolerancePlus: parsed.tolerancePlus,
     toleranceMinus: parsed.toleranceMinus,
+    symbol: parsed.symbol || '',
+    dimensionType: parsed.dimensionType || (parsed.tolerancePlus === null ? 'LINEAR' : 'TOLERANCED_LINEAR'),
     page,
     x: original.x0 / SCALE,
     y: (originalHeight - original.y1) / SCALE,
@@ -426,19 +431,17 @@ async function extractLabDimensions(buffer) {
               continue;
             }
             if (!parsed) continue;
-            // PSM 6 is a recovery pass for compact technical text. Plain values
-            // from this mode are too prone to profile geometry and are ignored.
-            if (psm === 6 && parsed.kind === 'PLAIN') continue;
             if (parsed.kind === 'PLAIN') {
-              // A short, low-confidence number is commonly a fragment of a
-              // tolerance or arrow, never a safe production control point.
-              if (word.confidence < 60 || parsed.nominal < .5 || parsed.nominal > 500) continue;
-              const isInteger = Number.isInteger(parsed.nominal);
-              if ((isInteger && parsed.nominal <= 99) && isBalloonToken(view.surface?.context || surface.context, word.bbox)) continue;
-              if (isInteger && parsed.nominal <= 12) continue;
+              // Keep plausible plain values in the candidate pool. The blue
+              // mask has already removed black administrative text; geometry
+              // and context must decide whether a small value is a dimension.
+              // Do not discard small integers before that evidence is available.
+              if (word.confidence < 25 || parsed.nominal < .5 || parsed.nominal > 500) continue;
+              if (Number.isInteger(parsed.nominal) && parsed.nominal <= 99
+                && isBalloonToken(view.surface?.context || surface.context, word.bbox)) continue;
             }
             const reason = parsed.kind === 'PLAIN'
-              ? 'Cota sem tolerância explícita. Confira no desenho.'
+              ? (word.confidence < 60 ? 'Candidato simples mantido para revisão; confirme a linha de dimensão no desenho.' : 'Cota sem tolerância explícita. Confira no desenho.')
               : 'Leitura técnica pela posição de nominal e tolerância. Confira no desenho.';
             all.push(makeCandidate(parsed, word.text, word.bbox, pageNumber, angle, surface.canvas.height, word.confidence / 100, reason));
           }
