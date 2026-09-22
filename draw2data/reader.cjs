@@ -6,7 +6,18 @@ async function extractPdf(buffer,options={}){
  try{
   for(let pageNumber=1;pageNumber<=maxPages;pageNumber++){
    const page=await document.getPage(pageNumber),content=await page.getTextContent(),viewport=page.getViewport({scale:1});
-   const items=content.items.filter(item=>String(item.str||'').trim()).map(item=>{const matrix=item.transform||[];return {text:String(item.str),x:Number(matrix[4]||0),y:Number(matrix[5]||0),width:Number(item.width||0),height:Number(item.height||0),rotation:Number((Math.atan2(Number(matrix[1]||0),Number(matrix[0]||1))*180/Math.PI).toFixed(2))}});
+   const items=content.items.filter(item=>String(item.str||'').trim()).map(item=>{
+    const matrix=item.transform||[],originX=Number(matrix[4]||0),originY=Number(matrix[5]||0);
+    const axisX=Number(matrix[0]||1),axisY=Number(matrix[1]||0),axisLength=Math.hypot(axisX,axisY)||1;
+    const width=Number(item.width||0),height=Number(item.height||Math.hypot(Number(matrix[2]||0),Number(matrix[3]||0))||0);
+    const normalX=Number(matrix[2]||0),normalY=Number(matrix[3]||1),normalLength=Math.hypot(normalX,normalY)||1;
+    const corners=[[originX,originY],[originX+axisX/axisLength*width,originY+axisY/axisLength*width],
+     [originX+normalX/normalLength*height,originY+normalY/normalLength*height],
+     [originX+axisX/axisLength*width+normalX/normalLength*height,originY+axisY/axisLength*width+normalY/normalLength*height]]
+     .map(([x,y])=>viewport.convertToViewportPoint(x,y)).map(([x,y])=>({x,y:viewport.height-y}));
+    const xs=corners.map(point=>point.x),ys=corners.map(point=>point.y),baselineStart=corners[0],baselineEnd=corners[1];
+    return {text:String(item.str),x:Math.min(...xs),y:Math.min(...ys),width:Math.max(...xs)-Math.min(...xs),height:Math.max(...ys)-Math.min(...ys),rotation:Number((Math.atan2(baselineEnd.y-baselineStart.y,baselineEnd.x-baselineStart.x)*180/Math.PI).toFixed(2))};
+   });
    const text=items.map(item=>item.text).join(' ').replace(/\s+/g,' ').trim();
    pages.push({page:pageNumber,width:viewport.width,height:viewport.height,text,items});fullText+=(fullText?'\n':'')+text;
   }

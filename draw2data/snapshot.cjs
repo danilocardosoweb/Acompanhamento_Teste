@@ -34,6 +34,13 @@ async function renderDimensionSnapshot(bytes, dimension) {
         crop.context.lineWidth = 4;
         crop.context.fillRect(markerX - 6, markerY - 6, width * scale + 12, height * scale + 12);
         crop.context.strokeRect(markerX - 6, markerY - 6, width * scale + 12, height * scale + 12);
+        if (dimension.debug && dimension.geometryEvidence?.line) {
+          const line = dimension.geometryEvidence.line, labScale = 5, cropTop = pageHeight - top;
+          crop.context.save();
+          crop.context.strokeStyle = '#7c3aed'; crop.context.lineWidth = 3; crop.context.setLineDash([8, 5]);
+          crop.context.beginPath(); crop.context.moveTo((line.x0 / labScale - left) * scale, (line.y0 / labScale - cropTop) * scale); crop.context.lineTo((line.x1 / labScale - left) * scale, (line.y1 / labScale - cropTop) * scale); crop.context.stroke();
+          crop.context.setLineDash([]); crop.context.fillStyle = '#7c3aed'; crop.context.font = 'bold 16px sans-serif'; crop.context.fillText(`${dimension.decisionClassification || 'REVIEW'} ${Math.round(Number(dimension.dimensionScore || 0))}%`, 10, 22); crop.context.restore();
+        }
         const image = crop.canvas.toBuffer('image/png');
         return { bytes: image, page: pageNumber, width: cropWidth, height: cropHeight };
       } finally {

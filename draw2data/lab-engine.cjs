@@ -3,6 +3,9 @@ const path = require('path');
 const os = require('os');
 const { createWorker } = require('tesseract.js');
 const { loadPdfJs } = require('./pdfjs.cjs');
+const { isSameDimensionComponent, parseTechnicalDimension } = require('./dimension-decision.cjs');
+const { DEFAULT_OCR_PIPELINE_CONFIG, expandBox, incompleteReadingSignals, chooseBestOCRCandidate, ocrCacheKey, OCRAttemptCache } = require('./dimension-pipeline.cjs');
+const { detectTextContainer, classifyFeatureId, scoreStructuralMerge, flagSuspiciousNumericPrefix, splitSuspiciousOCR } = require('./structural-analysis.cjs');
 
 const SCALE = 5;
 const MAX_PAGES = 10;
@@ -49,6 +52,10 @@ function parseDimension(value) {
   }
   const plain = compact.match(/^\d+(?:[,.]\d+)?$/);
   if (plain) return { nominal: number(plain[0]), tolerancePlus: null, toleranceMinus: null, kind: 'PLAIN', ...(symbol ? { symbol } : {}) };
+  const angle=compact.match(/^(\d+(?:[,.]\d+)?)(?:°|DEG)$/i);if(angle&&number(angle[1])<=360)return{nominal:number(angle[1]),tolerancePlus:null,toleranceMinus:null,kind:'ANGLE',type:'ANGLE',symbol:'°'};
+  const diameter=compact.match(/^[Ø⌀](\d+(?:[,.]\d+)?)(?:±(\d+(?:[,.]\d+)?))?$/i);if(diameter)return{nominal:number(diameter[1]),tolerancePlus:diameter[2]?number(diameter[2]):null,toleranceMinus:diameter[2]?number(diameter[2]):null,kind:'DIAMETER',type:'DIAMETER',symbol:'Ø'};
+  const thread=compact.match(/^M(\d+(?:[,.]\d+)?)(?:[Xx](\d+(?:[,.]\d+)?))?$/);if(thread)return{nominal:number(thread[1]),pitch:thread[2]?number(thread[2]):null,tolerancePlus:null,toleranceMinus:null,kind:'THREAD',type:'THREAD',symbol:'M'};
+  const chamfer=compact.match(/^(?:C(\d+(?:[,.]\d+)?)|(\d+(?:[,.]\d+)?)X(\d+(?:[,.]\d+)?)(?:°|DEG))$/i);if(chamfer)return{nominal:number(chamfer[1]||chamfer[2]),angle:chamfer[3]?number(chamfer[3]):null,tolerancePlus:null,toleranceMinus:null,kind:'CHAMFER',type:'CHAMFER',symbol:chamfer[1]?'C':'×'};
   return null;
 }
 
@@ -239,15 +246,22 @@ function parseFocusedDimension(fullText, leftText, rightText) {
 
 function rotate(factory, canvas, angle) {
   if (!angle) return { canvas, width: canvas.width, height: canvas.height, owned: false };
+  if (Math.abs(angle) === 180) {
+    const result = factory.create(canvas.width, canvas.height);
+    result.context.translate(canvas.width, canvas.height); result.context.rotate(Math.PI); result.context.drawImage(canvas, 0, 0);
+    return { canvas: result.canvas, width: result.canvas.width, height: result.canvas.height, owned: true, surface: result };
+  }
   const result = factory.create(canvas.height, canvas.width);
-  result.context.translate(canvas.height, 0);
-  result.context.rotate(Math.PI / 2);
+  if(angle<0){result.context.translate(0,canvas.width);result.context.rotate(-Math.PI/2)}
+  else{result.context.translate(canvas.height,0);result.context.rotate(Math.PI/2)}
   result.context.drawImage(canvas, 0, 0);
   return { canvas: result.canvas, width: result.canvas.width, height: result.canvas.height, owned: true, surface: result };
 }
 
-function originalBox(box, angle, originalHeight) {
+function originalBox(box, angle, originalHeight, originalWidth) {
   if (!angle) return box;
+  if(Math.abs(angle)===180)return {x0:originalWidth-box.x1,y0:originalHeight-box.y1,x1:originalWidth-box.x0,y1:originalHeight-box.y0};
+  if(angle<0)return {x0:originalWidth-box.y1,y0:box.x0,x1:originalWidth-box.y0,y1:box.x1};
   return { x0: box.y0, y0: originalHeight - box.x1, x1: box.y1, y1: originalHeight - box.x0 };
 }
 
@@ -273,8 +287,8 @@ function isBalloonToken(context, box) {
   return hits >= 3;
 }
 
-function makeCandidate(parsed, rawText, box, page, angle, originalHeight, confidence, reason) {
-  const original = originalBox(box, angle, originalHeight);
+function makeCandidate(parsed, rawText, box, page, angle, originalHeight, confidence, reason, originalWidth) {
+  const original = originalBox(box, angle, originalHeight, originalWidth);
   const symmetric = parsed.tolerancePlus !== null && Math.abs(parsed.tolerancePlus - parsed.toleranceMinus) < 1e-9;
   const canonical = parsed.kind === 'RADIUS'
     ? `R${printable(parsed.nominal)}`
@@ -295,6 +309,7 @@ function makeCandidate(parsed, rawText, box, page, angle, originalHeight, confid
     height: (original.y1 - original.y0) / SCALE,
     rotation: angle,
     confidence: Math.max(0, Math.min(.98, confidence)),
+    ocrConfidence: Math.max(0, Math.min(.98, confidence)),
     dimensionType: parsed.kind === 'RADIUS' ? 'RADIUS' : 'LINEAR',
     source: 'OCR_LAB',
     status: 'REVISAR',
@@ -302,16 +317,82 @@ function makeCandidate(parsed, rawText, box, page, angle, originalHeight, confid
   };
 }
 
-function nearbyCompound(words, index) {
+function geometryEvidenceForCandidate(context, candidate) {
+  const width=context.canvas.width,height=context.canvas.height,x0=Math.max(0,Math.floor(Number(candidate.x)*SCALE)),x1=Math.min(width-1,Math.ceil((Number(candidate.x)+Number(candidate.width||0))*SCALE));
+  const y0=Math.max(0,Math.floor(height-(Number(candidate.y)+Number(candidate.height||0))*SCALE)),y1=Math.min(height-1,Math.ceil(height-Number(candidate.y)*SCALE));
+  const margin=Math.max(24,Math.round(Math.max(x1-x0,y1-y0)*3)),left=Math.max(0,x0-margin),right=Math.min(width-1,x1+margin),top=Math.max(0,y0-margin),bottom=Math.min(height-1,y1+margin);
+  const pixels=context.getImageData(left,top,right-left+1,bottom-top+1).data,regionWidth=right-left+1,regionHeight=bottom-top+1;
+  const ink=(x,y)=>{const offset=(y*regionWidth+x)*4,r=pixels[offset],g=pixels[offset+1],b=pixels[offset+2];return Math.min(r,g,b)<170||Math.max(r,g,b)-Math.min(r,g,b)>55};
+  const local={x0:x0-left,x1:x1-left,y0:y0-top,y1:y1-top};let horizontal=0,vertical=0,horizontalLine=null,verticalLine=null,inkOutside=0,outside=0;
+  for(let y=0;y<regionHeight;y++){let run=0,start=0;for(let x=0;x<=regionWidth;x++){const inside=x<regionWidth&&x>=local.x0&&x<=local.x1&&y>=local.y0&&y<=local.y1;if(x<regionWidth&&ink(x,y)&&!inside){if(!run)start=x;run++}else{if(run>horizontal){horizontal=run;horizontalLine={start,end:x-1,axis:y}}run=0}}}
+  for(let y=0;y<regionHeight;y++)for(let x=0;x<regionWidth;x++){const inside=x>=local.x0&&x<=local.x1&&y>=local.y0&&y<=local.y1;if(!inside){outside++;if(ink(x,y))inkOutside++;}}
+  for(let x=0;x<regionWidth;x++){let run=0,start=0;for(let y=0;y<=regionHeight;y++){const inside=y<regionHeight&&x>=local.x0&&x<=local.x1&&y>=local.y0&&y<=local.y1;if(y<regionHeight&&ink(x,y)&&!inside){if(!run)start=y;run++}else{if(run>vertical){vertical=run;verticalLine={start,end:y-1,axis:x}}run=0}}}
+  const textSpan=Math.max(8,Math.min(Math.max(1,x1-x0),Math.max(1,y1-y0))),horizontalAligned=horizontalLine&&horizontalLine.end>=local.x0&&horizontalLine.start<=local.x1&&Math.min(Math.abs(horizontalLine.axis-local.y0),Math.abs(horizontalLine.axis-local.y1))<=Math.max(24,(local.y1-local.y0)*4),verticalAligned=verticalLine&&verticalLine.end>=local.y0&&verticalLine.start<=local.y1&&Math.min(Math.abs(verticalLine.axis-local.x0),Math.abs(verticalLine.axis-local.x1))<=Math.max(24,(local.x1-local.x0)*4),dimensionLine=(horizontal>=vertical?horizontalAligned:verticalAligned)&&Math.max(horizontal,vertical)>=Math.max(28,textSpan*1.4),density=inkOutside/Math.max(1,outside),nearbyProfile=density>.012;
+  const diagonalHits=(line,verticalAxis=false)=>{if(!line)return 0;let hits=0;for(const endpoint of [{value:line.start,direction:1},{value:line.end,direction:-1}]){let upper=0,lower=0;for(let distance=2;distance<=12;distance+=2){const offset=Math.max(1,Math.round(distance*.55));if(verticalAxis){if(ink(line.axis-offset,endpoint.value+endpoint.direction*distance))upper++;if(ink(line.axis+offset,endpoint.value+endpoint.direction*distance))lower++;}else{if(ink(endpoint.value+endpoint.direction*distance,line.axis-offset))upper++;if(ink(endpoint.value+endpoint.direction*distance,line.axis+offset))lower++;}}if(upper>=2&&lower>=2)hits++;}return hits};
+  const horizontalPrimary=horizontal>=vertical,primaryLine=horizontalPrimary?horizontalLine:verticalLine,terminationCount=dimensionLine?(horizontalPrimary?diagonalHits(horizontalLine):diagonalHits(verticalLine,true)):0;
+  const extensionCount=(()=>{if(!dimensionLine||!primaryLine)return 0;let count=0;const endpoints=[primaryLine.start,primaryLine.end];for(const endpoint of endpoints){let best=0;for(let offset=-7;offset<=7;offset++){let run=0;if(horizontalPrimary){const x=endpoint+offset;for(let y=0;y<regionHeight;y++){if(ink(x,y))run++;else{best=Math.max(best,run);run=0}}}else{const y=endpoint+offset;for(let x=0;x<regionWidth;x++){if(ink(x,y))run++;else{best=Math.max(best,run);run=0}}}}if(best>=Math.max(16,textSpan*.8))count++;}return count})();
+  const orientation=horizontalPrimary?'HORIZONTAL':'VERTICAL',absoluteLine=primaryLine?(horizontalPrimary?{x0:left+primaryLine.start,y0:top+primaryLine.axis,x1:left+primaryLine.end,y1:top+primaryLine.axis}:{x0:left+primaryLine.axis,y0:top+primaryLine.start,x1:left+primaryLine.axis,y1:top+primaryLine.end}):null;
+  const dimensionLineId=absoluteLine?`p${candidate.page}-${orientation[0]}-${Math.round(absoluteLine.x0/10)}-${Math.round(absoluteLine.y0/10)}-${Math.round(absoluteLine.x1/10)}-${Math.round(absoluteLine.y1/10)}`:null;
+  const leader=(()=>{let best=null;const directions=[[-1,-1],[1,-1],[-1,1],[1,1],[-1,-.5],[1,-.5],[-1,.5],[1,.5]],textHeight=Math.max(6,local.y1-local.y0),maxDistance=Math.max(44,Math.min(180,textHeight*9));for(const [dx,dy] of directions){const anchorXs=[local.x0+2,Math.round((local.x0+local.x1)/2),local.x1-2],anchorYs=[local.y0+2,Math.round((local.y0+local.y1)/2),local.y1-2];for(const ax of anchorXs)for(const ay of anchorYs){if(ax<0||ay<0||ax>=regionWidth||ay>=regionHeight)continue;let hits=0,last=0,first=0;for(let step=4;step<=maxDistance;step+=3){const x=Math.round(ax+dx*step),y=Math.round(ay+dy*step);if(x<0||x>=regionWidth||y<0||y>=regionHeight)break;let localHit=false;for(let ox=-1;ox<=1;ox++)for(let oy=-1;oy<=1;oy++)if(ink(x+ox,y+oy))localHit=true;if(localHit){if(!first)first=step;hits++;last=step}}const span=last-first,ratio=hits/Math.max(1,Math.ceil(span/3));if(span>=Math.max(24,textHeight*1.35)&&ratio>.62&&(!best||span>best.span))best={dx,dy,ax,ay,span,confidence:Math.min(.96,.5+ratio*.45),x1:Math.round(ax+dx*last),y1:Math.round(ay+dy*last)};}}return best})();
+  const associatedLeaderLineId=leader?`p${candidate.page}-leader-${Math.round((left+leader.ax)/12)}-${Math.round((top+leader.ay)/12)}-${Math.round((left+leader.x1)/12)}-${Math.round((top+leader.y1)/12)}`:null;
+  return {dimensionLine,dimensionLineId,orientation,line:absoluteLine,arrowTermination:terminationCount>0,terminationCount,dimensionTermination:{startProbability:terminationCount>0?.72:.15,endProbability:terminationCount>1?.72:terminationCount>0?.42:.15,type:terminationCount?'ARROW_OR_MARK':'UNKNOWN'},extensionLines:extensionCount>0,extensionLineCount:extensionCount,associatedLeaderLineId,leaderLine:leader?{id:associatedLeaderLineId,confidence:leader.confidence,segment:{x0:left+leader.ax,y0:top+leader.ay,x1:left+leader.x1,y1:top+leader.y1},target:'PROFILE_OR_CURVE_UNCONFIRMED'}:null,compatibleAlignment:dimensionLine,nearbyProfile,farFromProfile:!nearbyProfile,longestHorizontal:horizontal,longestVertical:vertical,inkDensity:Number(density.toFixed(4))};
+}
+
+function technicalToLab(parsed) {
+  if (!parsed) return null;
+  return { nominal: parsed.nominal, tolerancePlus: parsed.upperTolerance == null ? null : parsed.upperTolerance, toleranceMinus: parsed.lowerTolerance == null ? null : Math.abs(parsed.lowerTolerance), kind: parsed.kind, symbol: parsed.symbol || '', type: parsed.type };
+}
+
+async function progressiveOCRCandidate(document, worker, canvas, candidate, options = {}) {
+  const config = { ...DEFAULT_OCR_PIPELINE_CONFIG, ...(options.config || {}) }, cache = options.cache || new OCRAttemptCache();
+  const page = Number(candidate.page), documentId = options.documentId || 'document';
+  const baseBox = { x0: Number(candidate.x) * SCALE, x1: (Number(candidate.x) + Number(candidate.width || 0)) * SCALE, y0: canvas.height - (Number(candidate.y) + Number(candidate.height || 0)) * SCALE, y1: canvas.height - Number(candidate.y) * SCALE };
+  const attempts = [];
+  for (const expansion of config.cropExpansionLevels) {
+    const box = expandBox(baseBox, expansion, canvas.width, canvas.height), focused = crop(document.canvasFactory, canvas, box, 0);
+    try {
+      for (const rotation of [0]) {
+        const key = ocrCacheKey({ documentId, page, bbox: box, rotation, expansion, psm: 7 });
+        const data = await cache.getOrCreate(key, async () => { await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789.,+-±RrØ⌀MmXxCc°' }); return (await worker.recognize(focused.canvas.toBuffer('image/png'))).data; });
+        attempts.push({ text: String(data.text || '').trim(), confidence: Number(data.confidence || 0) / 100, bbox: data.words?.[0]?.bbox || { x0: 0, y0: 0, x1: focused.canvas.width, y1: focused.canvas.height }, cropBox: { x0: 0, y0: 0, x1: focused.canvas.width, y1: focused.canvas.height }, expansion, rotation });
+      }
+    } finally { document.canvasFactory.destroy(focused); }
+    const best = chooseBestOCRCandidate(attempts, parseTechnicalDimension);
+    if (best?.finalScore >= config.acceptScore && !best.incompleteSignals.length) return { best, attempts, cache: cache.diagnostics() };
+  }
+  let best = chooseBestOCRCandidate(attempts, parseTechnicalDimension);
+  if (!best || best.finalScore < config.rotationTriggerScore || best.incompleteSignals.length) {
+    const box = expandBox(baseBox, config.cropExpansionLevels.at(-1), canvas.width, canvas.height), focused = crop(document.canvasFactory, canvas, box, 0);
+    try {
+      for (const rotation of config.rotations.filter(value => value !== 0)) {
+        const view = rotate(document.canvasFactory, focused.canvas, rotation), key = ocrCacheKey({ documentId, page, bbox: box, rotation, expansion: config.cropExpansionLevels.at(-1), psm: 7 });
+        try { const data = await cache.getOrCreate(key, async () => { await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789.,+-±RrØ⌀MmXxCc°' }); return (await worker.recognize(view.canvas.toBuffer('image/png'))).data; }); attempts.push({ text: String(data.text || '').trim(), confidence: Number(data.confidence || 0) / 100, expansion: config.cropExpansionLevels.at(-1), rotation, bbox: data.words?.[0]?.bbox || {}, cropBox: { x0: 0, y0: 0, x1: view.width, y1: view.height } }); } finally { if (view.owned) document.canvasFactory.destroy(view.surface); }
+      }
+    } finally { document.canvasFactory.destroy(focused); }
+    best = chooseBestOCRCandidate(attempts, parseTechnicalDimension);
+  }
+  return { best, attempts, cache: cache.diagnostics() };
+}
+
+function nearbyCompound(words, index, context = null, structural = {}) {
   const base = words[index], parsedBase = parseDimension(base.text);
   if (!parsedBase || parsedBase.kind !== 'PLAIN') return null;
   const baseCenter = center(base.bbox), height = Math.max(16, base.bbox.y1 - base.bbox.y0);
+  const component=word=>({x:word.bbox.x0,y:word.bbox.y0,width:word.bbox.x1-word.bbox.x0,height:word.bbox.y1-word.bbox.y0,rotation:0});
   const candidates = words
     .filter((word, candidateIndex) => candidateIndex !== index)
     .map(word => ({ word, parsed: normalizeTechnicalText(word.text), c: center(word.bbox) }))
-    .filter(({ word, c }) => c.x > baseCenter.x + height * .25
+    .filter(({ word, c }) => {
+      const containerA=context?detectTextContainer(context,base.bbox):null,containerB=context?detectTextContainer(context,word.bbox):null;
+      const featureA=classifyFeatureId(base.text,{container:containerA}),featureB=classifyFeatureId(word.text,{container:containerB});
+      if(featureA.classification==='FEATURE_ID'||featureB.classification==='FEATURE_ID')return false;
+      const relation=scoreStructuralMerge({text:base.text,bbox:base.bbox,rotation:0},{text:word.text,bbox:word.bbox,rotation:0},{containerA,containerB,zoneA:structural.zone||'DRAWING_AREA',zoneB:structural.zone||'DRAWING_AREA',sameVisualComponent:isSameDimensionComponent(component(base),component(word))>=55,compatibleSemanticSequence:true});
+      return relation.allowed
+        && isSameDimensionComponent(component(base),component(word))>=55
+      && c.x > baseCenter.x + height * .25
       && c.x <= baseCenter.x + height * 8
-      && Math.abs(c.y - baseCenter.y) <= height * 1.6)
+      && Math.abs(c.y - baseCenter.y) <= height * 1.6;
+    })
     .sort((a, b) => Math.hypot(a.c.x - baseCenter.x, a.c.y - baseCenter.y) - Math.hypot(b.c.x - baseCenter.x, b.c.y - baseCenter.y));
 
   const plus = candidates.find(({ parsed }) => /^\+\d+(?:[,.]\d+)?$/.test(parsed));
@@ -323,15 +404,18 @@ function nearbyCompound(words, index) {
   const parsed = parseDimension(assembled);
   if (!parsed || parsed.kind === 'PLAIN') return null;
   const boxes = [base.bbox, plus.word.bbox, minus?.word.bbox].filter(Boolean);
-  return { parsed, rawText: assembled, bbox: { x0: Math.min(...boxes.map(item => item.x0)), y0: Math.min(...boxes.map(item => item.y0)), x1: Math.max(...boxes.map(item => item.x1)), y1: Math.max(...boxes.map(item => item.y1)) }, confidence: Math.min(base.confidence, plus.word.confidence, minus?.word.confidence ?? 100) / 100 };
+  const groupingConfidence=Math.min(isSameDimensionComponent(component(base),component(plus.word)),minus?isSameDimensionComponent(component(plus.word),component(minus.word)):100)/100;
+  return { parsed, rawText: assembled, rawOCRTokens:[base,plus.word,minus?.word].filter(Boolean).map(word=>({text:word.text,bbox:{...word.bbox},confidence:word.confidence})), bbox: { x0: Math.min(...boxes.map(item => item.x0)), y0: Math.min(...boxes.map(item => item.y0)), x1: Math.max(...boxes.map(item => item.x1)), y1: Math.max(...boxes.map(item => item.y1)) }, confidence: Math.min(base.confidence, plus.word.confidence, minus?.word.confidence ?? 100) / 100, groupingConfidence };
 }
 
-function nearbyRadius(words, index) {
+function nearbyRadius(words, index, context = null) {
   const base = words[index];
   if (!/^R$/i.test(String(base?.text || '').trim())) return null;
   const origin = center(base.bbox), height = Math.max(12, base.bbox.y1 - base.bbox.y0);
-  const candidate = words.map((word, candidateIndex) => ({ word, candidateIndex, center: center(word.bbox), parsed: parseDimension(word.text) }))
+  const candidate = words.map((word, candidateIndex) => ({ word, candidateIndex, center: center(word.bbox), parsed: parseDimension(word.text), container:context?detectTextContainer(context,word.bbox):null }))
     .filter(item => item.candidateIndex !== index && item.parsed?.kind === 'PLAIN'
+      && classifyFeatureId(item.word.text,{container:item.container}).classification!=='FEATURE_ID'
+      && !(item.container?.type&&item.container.type!=='NONE')
       && item.parsed.nominal > 0 && item.parsed.nominal <= 25
       && item.center.x > origin.x && item.center.x - origin.x <= height * 4
       && Math.abs(item.center.y - origin.y) <= height * 1.5)
@@ -419,7 +503,7 @@ async function scanFlatBarFineTiles(document, worker, surface, all, pageNumber) 
   // A few legacy BC sheets have garbled vector text and very small dimensions
   // embedded in the page image. Only invoke this slower recovery when the
   // normal page and neighborhood passes found nothing.
-  for (const angle of [0, 90]) {
+  for (const angle of [0, 90, -90]) {
     const view = rotate(document.canvasFactory, surface.canvas, angle);
     const overlap = Math.max(36, Math.round(Math.min(view.width, view.height) * .025));
     const tileWidth = Math.ceil(view.width / 4), tileHeight = Math.ceil(view.height / 4);
@@ -447,7 +531,7 @@ async function scanFlatBarFineTiles(document, worker, surface, all, pageNumber) 
               : parsed.kind === 'SYMMETRIC_COMPACT'
                 ? 'Tolerância reconstruída na varredura ampliada da barra. Confira no desenho.'
                 : 'Cota localizada na varredura ampliada da barra. Confira no desenho.';
-            all.push(makeCandidate(parsed, text, box, pageNumber, angle, surface.canvas.height, Number(line.confidence || data.confidence || 0) / 100, reason));
+            all.push(makeCandidate(parsed, text, box, pageNumber, angle, surface.canvas.height, Number(line.confidence || data.confidence || 0) / 100, reason, surface.canvas.width));
           }
         }
       } finally {
@@ -480,7 +564,7 @@ async function extractLabDimensions(buffer, options = {}) {
   const cachePath = process.env.VERCEL ? path.join(os.tmpdir(), 'draw2data-cache', 'lab') : path.join(__dirname, '..', '.draw2data-cache', 'lab');
   fs.mkdirSync(cachePath, { recursive: true });
   let worker;
-  const all = [];
+  const all = [], featureIds=[], attemptCache = new OCRAttemptCache(), documentId = require('crypto').createHash('sha1').update(buffer).digest('hex').slice(0,16);
   try {
     const maxPages = Math.min(document.numPages, Math.max(1, Math.min(MAX_PAGES, Number(options.maxPages) || MAX_PAGES)));
     worker = await createWorker('eng', 1, { cachePath });
@@ -491,6 +575,8 @@ async function extractLabDimensions(buffer, options = {}) {
       if (viewport.width * viewport.height > 32000000) throw Error('Página grande demais para a leitura experimental.');
       const surface = document.canvasFactory.create(viewport.width, viewport.height);
       await page.render({ canvasContext: surface.context, viewport }).promise;
+      const geometrySurface=document.canvasFactory.create(viewport.width,viewport.height);
+      geometrySurface.context.drawImage(surface.canvas,0,0);
       const redFrames = findRedFrames(surface.context);
       buildBlueTextMask(surface.context);
 
@@ -503,17 +589,19 @@ async function extractLabDimensions(buffer, options = {}) {
         try {
           const readings = [];
           let focusedDimension = null;
+          const focusedCandidates = [];
           for (const psm of focusedOnlyPage ? [6] : [6, 11]) {
             await worker.setParameters({ tessedit_pageseg_mode: String(psm), tessedit_char_whitelist: '0123456789.,+-±' });
             const { data } = await worker.recognize(focused.canvas.toBuffer('image/png'), {}, { blocks: true, text: true });
             readings.push(String(data.text || ''));
             const parsed = parseDimension(String(data.text || '').replace(/\s+/g, ''));
             if (parsed && parsed.kind !== 'PLAIN') {
-              focusedDimension = parsed;
-              framedNominals.push({ nominal: parsed.nominal, frame });
-              all.push(makeCandidate(parsed, data.text, frame, pageNumber, 0, surface.canvas.height, Math.max(.55, Number(data.confidence || 0) / 100), 'Cota crítica lida dentro da marcação do desenho. Confira a leitura.'));
+              focusedCandidates.push({ parsed, text: data.text, confidence: Math.max(.55, Number(data.confidence || 0) / 100) });
             }
           }
+          const signatures=new Set(focusedCandidates.map(item=>`${item.parsed.nominal}|${item.parsed.tolerancePlus}|${item.parsed.toleranceMinus}`));
+          if(signatures.size===1&&focusedCandidates.length){const best=focusedCandidates.sort((a,b)=>b.confidence-a.confidence)[0];focusedDimension=best.parsed;framedNominals.push({nominal:best.parsed.nominal,frame});all.push({...makeCandidate(best.parsed,best.text,frame,pageNumber,0,surface.canvas.height,best.confidence,'Cota crítica selecionada dentro da marcação do desenho. Confira a leitura.'),ocrPass:'RED_FRAME'});}
+          else if(signatures.size>1)focusedDimension={conflicted:true};
           if (!focusedDimension) {
             const middle = (frame.x0 + frame.x1) / 2;
             const left = crop(document.canvasFactory, surface.canvas, { x0: frame.x0, y0: frame.y0, x1: middle, y1: frame.y1 }, 6);
@@ -526,7 +614,7 @@ async function extractLabDimensions(buffer, options = {}) {
               if (leftNominal !== null) framedNominals.push({ nominal: leftNominal, frame });
               const focusedResult = parseFocusedDimension(readings.join('|'), leftResult.data.text, rightResult.data.text);
               if (focusedResult) {
-                all.push(makeCandidate(focusedResult.parsed, readings.join(' '), frame, pageNumber, 0, surface.canvas.height, focusedResult.inferred ? .58 : .72, focusedResult.inferred ? 'Tolerância reconstruída dentro da marcação crítica. Confira a leitura.' : 'Cota crítica lida dentro da marcação do desenho. Confira a leitura.'));
+                all.push({...makeCandidate(focusedResult.parsed, readings.join(' '), frame, pageNumber, 0, surface.canvas.height, focusedResult.inferred ? .58 : .72, focusedResult.inferred ? 'Tolerância reconstruída dentro da marcação crítica. Confira a leitura.' : 'Cota crítica lida dentro da marcação do desenho. Confira a leitura.'),ocrPass:'RED_FRAME'});
               }
             } finally {
               document.canvasFactory.destroy(left);
@@ -542,17 +630,22 @@ async function extractLabDimensions(buffer, options = {}) {
       // same profile. When one copy exposes the stacked tolerance and the
       // other exposes only its nominal, carry the matched tolerance over as a
       // low-confidence review item instead of silently dropping that cota.
-      for (const framed of framedNominals) {
+      // Kept as an opt-in compatibility recovery. Copying a tolerance from a
+      // different framed label is unsafe by default: a partial OCR such as
+      // 156 -> 5 can manufacture a new, plausible-looking dimension.
+      for (const framed of options.inferRepeatedFramedTolerance === true ? framedNominals : []) {
         const x = framed.frame.x0 / SCALE, y = (surface.canvas.height - framed.frame.y1) / SCALE;
         const alreadyRead = all.some(item => item.page === pageNumber && item.tolerancePlus !== null && Math.hypot(item.x - x, item.y - y) < 16);
         if (alreadyRead) continue;
         const matching = all.find(item => item.page === pageNumber && item.tolerancePlus !== null && Math.abs(item.nominal - framed.nominal) < .001);
         if (matching) {
-          all.push(makeCandidate({ nominal: framed.nominal, tolerancePlus: matching.tolerancePlus, toleranceMinus: matching.toleranceMinus }, printable(framed.nominal), framed.frame, pageNumber, 0, surface.canvas.height, .4, 'Tolerância repetida de uma cota crítica simétrica. Confira a leitura.'));
+          all.push({...makeCandidate({ nominal: framed.nominal, tolerancePlus: matching.tolerancePlus, toleranceMinus: matching.toleranceMinus }, printable(framed.nominal), framed.frame, pageNumber, 0, surface.canvas.height, .4, 'Tolerância repetida de uma cota crítica simétrica. Confira a leitura.'),ocrPass:'RED_FRAME'});
         }
       }
 
       if (focusedOnlyPage) {
+        for(const candidate of all.filter(item=>Number(item.page)===pageNumber))candidate.geometryEvidence=geometryEvidenceForCandidate(geometrySurface.context,candidate);
+        document.canvasFactory.destroy(geometrySurface);
         document.canvasFactory.destroy(surface);
         continue;
       }
@@ -599,7 +692,7 @@ async function extractLabDimensions(buffer, options = {}) {
       }
       if (options.flatBarRecovery && !all.some(item => item.page === pageNumber)) await scanFlatBarFineTiles(document, worker, surface, all, pageNumber);
 
-      for (const angle of [0, 90]) {
+      for (const angle of [0, 90, -90]) {
         const view = rotate(document.canvasFactory, surface.canvas, angle);
         for (const psm of [11, 6]) {
           await worker.setParameters({ tessedit_pageseg_mode: String(psm), tessedit_char_whitelist: '' });
@@ -612,18 +705,25 @@ async function extractLabDimensions(buffer, options = {}) {
           const words = sourceTokens
             .filter(word => (/\d/.test(word.text || '') || /^R$/i.test(String(word.text || '').trim())) && word.bbox)
             .map(word => ({ text: String(word.text).trim(), bbox: word.bbox, confidence: Number(word.confidence || 0) }));
-          for (let index = 0; index < words.length; index += 1) {
-            const word = words[index];
-            const radius = parseRadiusDimension(word.text, 25);
-            const splitRadius = !radius ? nearbyRadius(words, index) : null;
+        const visualContext=view.surface?.context||surface.context;
+        for (let index = 0; index < words.length; index += 1) {
+           const word = words[index];
+            const numericId=/^\d{1,3}$/.test(word.text),container=numericId&&angle===0?detectTextContainer(visualContext,word.bbox):{type:'NONE',containerId:null,confidence:0},feature=classifyFeatureId(word.text,{container});
+            if(feature.classification==='FEATURE_ID'){
+              const original=originalBox(word.bbox,angle,surface.canvas.height,surface.canvas.width);
+              featureIds.push({id:`feature-${pageNumber}-${featureIds.length+1}`,text:word.text,featureId:feature.featureId,classification:'FEATURE_ID',containerType:container.type,containerId:container.containerId,containerConfidence:container.confidence,page:pageNumber,x:original.x0/SCALE,y:(surface.canvas.height-original.y1)/SCALE,width:(original.x1-original.x0)/SCALE,height:(original.y1-original.y0)/SCALE,rotation:angle,bbox:original,rawOCRTokens:[{text:word.text,bbox:word.bbox,confidence:word.confidence}],visualComponentId:`visual-${container.containerId||pageNumber+'-'+Math.round(original.x0/4)+'-'+Math.round(original.y0/4)}`,reviewReason:container.type==='NONE'?'Identificador numérico próximo de uma dimensão e visualmente separado.':'Identificador de característica detectado dentro de um container gráfico; não incorporado à cota.'});
+              continue;
+            }
+           const radius = parseRadiusDimension(word.text, 25);
+            const splitRadius = !radius ? nearbyRadius(words, index,visualContext) : null;
             if (splitRadius) {
-              all.push(makeCandidate(splitRadius.parsed, `R${printable(splitRadius.parsed.nominal)}`, splitRadius.bbox, pageNumber, angle, surface.canvas.height, splitRadius.confidence, 'Raio identificado pelo símbolo R e pelo número adjacente. Confira a leitura.'));
+              all.push(makeCandidate(splitRadius.parsed, `R${printable(splitRadius.parsed.nominal)}`, splitRadius.bbox, pageNumber, angle, surface.canvas.height, splitRadius.confidence, 'Raio identificado pelo símbolo R e pelo número adjacente. Confira a leitura.',surface.canvas.width));
               continue;
             }
             const parsed = radius || parseDimension(word.text);
-            const compound = !radius && parsed?.kind === 'PLAIN' ? nearbyCompound(words, index) : null;
+            const compound = !radius && parsed?.kind === 'PLAIN' ? nearbyCompound(words, index,visualContext) : null;
             if (compound) {
-              all.push(makeCandidate(compound.parsed, compound.rawText, compound.bbox, pageNumber, angle, surface.canvas.height, compound.confidence, 'Tolerância agrupada pela posição no desenho. Confira a leitura.'));
+              all.push({...makeCandidate(compound.parsed, compound.rawText, compound.bbox, pageNumber, angle, surface.canvas.height, compound.confidence, 'Tolerância reconstruída a partir de fragmentos OCR estruturalmente compatíveis. Confira a leitura.',surface.canvas.width),groupingConfidence:compound.groupingConfidence,rawOCRText:words.filter(item=>compound.rawOCRTokens.some(token=>token.text===item.text&&token.bbox.x0===item.bbox.x0)).map(item=>item.text).join(' '),rawOCRTokens:compound.rawOCRTokens,mergedText:compound.rawText,finalText:compound.rawText});
               continue;
             }
             if (!parsed) continue;
@@ -643,19 +743,29 @@ async function extractLabDimensions(buffer, options = {}) {
               : parsed.kind === 'PLAIN'
               ? 'Cota sem tolerância explícita. Confira no desenho.'
               : 'Leitura técnica pela posição de nominal e tolerância. Confira no desenho.';
-            all.push(makeCandidate(parsed, word.text, word.bbox, pageNumber, angle, surface.canvas.height, word.confidence / 100, reason));
+            const candidate=makeCandidate(parsed, word.text, word.bbox, pageNumber, angle, surface.canvas.height, word.confidence / 100, reason,surface.canvas.width);
+            candidate.dimensionType=parsed.type||candidate.dimensionType;candidate.rawOCRText=word.text;candidate.rawOCRTokens=[{text:word.text,bbox:{...word.bbox},confidence:word.confidence,containerId:container.containerId||null}];candidate.normalizedText=normalizeTechnicalText(word.text);candidate.containerId=container.containerId;candidate.containerType=container.type;candidate.visualComponentId=`visual-${container.containerId||pageNumber+'-'+Math.round(candidate.x*4)+'-'+Math.round(candidate.y*4)}`;
+            const prefixMatch=String(word.text).match(/^(\d)(?=\d+[,.]\d+(?:±|\+|\/))/),prefixBox=prefixMatch?{x0:word.bbox.x0,y0:word.bbox.y0,x1:word.bbox.x0+(word.bbox.x1-word.bbox.x0)*.16,y1:word.bbox.y1}:null,prefixContainer=prefixBox?detectTextContainer(visualContext,prefixBox):null,prefix=flagSuspiciousNumericPrefix(word.text,[...candidate.rawOCRTokens,...(prefixContainer&&prefixContainer.type!=='NONE'?[{text:prefixMatch[1],bbox:prefixBox,possibleFeatureId:true,containerId:prefixContainer.containerId}]:[])]);if(prefix){candidate.suspiciousPrefix=prefix;candidate.status='REVISAR';candidate.reviewReason='Prefixo numérico suspeito; alternativas preservadas para conferência, sem alteração automática.';candidate.rawOCRTokens.push({text:prefixMatch?.[1]||'',bbox:prefixBox,containerId:prefixContainer?.containerId||null,possibleFeatureId:Boolean(prefixContainer?.type&&prefixContainer.type!=='NONE')});if(prefixContainer?.type&&prefixContainer.type!=='NONE')featureIds.push({id:`feature-${pageNumber}-${featureIds.length+1}`,text:prefixMatch[1],featureId:prefixMatch[1],classification:'FEATURE_ID',containerType:prefixContainer.type,containerId:prefixContainer.containerId,containerConfidence:prefixContainer.confidence,page:pageNumber,bbox:prefixBox,reviewReason:'Prefixo OCR separado estruturalmente por um container gráfico; candidato preservado como identificador.'});}
+            all.push(candidate);
           }
         }
         if (view.owned) document.canvasFactory.destroy(view.surface);
       }
+      const pageCandidates=all.filter(item=>Number(item.page)===pageNumber);
+      for(const candidate of pageCandidates){candidate.geometryEvidence=geometryEvidenceForCandidate(geometrySurface.context,candidate);candidate.dimensionLineId=candidate.geometryEvidence.dimensionLineId;candidate.associatedLeaderLineId=candidate.geometryEvidence.associatedLeaderLineId;}
+      const suspects=pageCandidates.filter(candidate=>{const parsed=parseTechnicalDimension(candidate.recognizedText||candidate.rawText),signals=incompleteReadingSignals(candidate.recognizedText||candidate.rawText);return candidate.rotation===0&&candidate.geometryEvidence?.dimensionLine&&(signals.length>0||!parsed)}).slice(0,DEFAULT_OCR_PIPELINE_CONFIG.maxCandidatesPerPage);
+      for(const candidate of suspects){const recovered=await progressiveOCRCandidate(document,worker,surface.canvas,candidate,{cache:attemptCache,documentId}),original=chooseBestOCRCandidate([{text:candidate.recognizedText||candidate.rawText,confidence:candidate.ocrConfidence||candidate.confidence||0}],parseTechnicalDimension),parsed=technicalToLab(recovered.best?.parsed);if(!parsed||!recovered.best||recovered.best.finalScore<Number(original?.finalScore||0)+.06)continue;const replacement=makeCandidate(parsed,recovered.best.text,{x0:candidate.x*SCALE,y0:surface.canvas.height-(candidate.y+candidate.height)*SCALE,x1:(candidate.x+candidate.width)*SCALE,y1:surface.canvas.height-candidate.y*SCALE},pageNumber,0,surface.canvas.height,recovered.best.ocrScore,'Leitura recuperada por expansão progressiva do recorte. Confira a leitura.',surface.canvas.width);Object.assign(candidate,replacement,{geometryEvidence:candidate.geometryEvidence,dimensionLineId:candidate.dimensionLineId,rotationUsed:recovered.best.rotation,cropExpansion:recovered.best.expansion,ocrAttemptScore:recovered.best.finalScore,ocrAttempts:recovered.attempts.map(item=>({text:item.text,confidence:item.confidence,rotation:item.rotation,expansion:item.expansion,finalScore:chooseBestOCRCandidate([item],parseTechnicalDimension)?.finalScore||0}))});}
+      document.canvasFactory.destroy(geometrySurface);
       document.canvasFactory.destroy(surface);
     }
   } finally {
     await worker?.terminate();
     await document.destroy();
   }
-  const result = distinct(all).map((candidate, index) => ({ ...candidate, id: `lab-${candidate.page}-${index + 1}` }));
+  const reliable=all.filter(candidate=>candidate.ocrPass!=='RED_FRAME'||Number(candidate.confidence)>=.8||all.some(other=>other!==candidate&&other.ocrPass!=='RED_FRAME'&&Number(other.page)===Number(candidate.page)&&Math.abs(Number(other.nominal)-Number(candidate.nominal))<.01&&Math.hypot(Number(other.x)-Number(candidate.x),Number(other.y)-Number(candidate.y))<24));
+  const result = distinct(reliable).map((candidate, index) => ({ ...candidate, id: `lab-${candidate.page}-${index + 1}`, rawOCRText:candidate.rawOCRText||candidate.recognizedText||candidate.rawText, rawOCRTokens:candidate.rawOCRTokens||[], normalizedText:candidate.normalizedText||candidate.rawText, mergedText:candidate.mergedText||null, finalText:candidate.finalText||candidate.rawText, ocrCacheDiagnostics: attemptCache.diagnostics() }));
+  result.featureIds=featureIds;result.associationGraph={nodes:[],edges:[]};
   return result;
 }
 
-module.exports = { extractLabDimensions, parseDimension, parseRadiusDimension, parseCompactSymmetric, parseNearbyDimension, normalizeTechnicalText, focusedOnlyForPage, shouldRunNeighborhoodRecovery, isDimensionInk };
+module.exports = { extractLabDimensions, parseDimension, parseRadiusDimension, parseCompactSymmetric, parseNearbyDimension, normalizeTechnicalText, focusedOnlyForPage, shouldRunNeighborhoodRecovery, isDimensionInk, originalBox, geometryEvidenceForCandidate, progressiveOCRCandidate, technicalToLab };

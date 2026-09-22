@@ -136,7 +136,7 @@ window.openPage=openPage;
 document.addEventListener('click',event=>{if(event.target.closest('.nav-button[data-page="controle"]'))openPage('controle');});
 document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>openPage(button.dataset.page)));
 function renderAuth(){const signed=!!authUser;$('auth-user').hidden=!signed;$('logout').hidden=!signed;$('auth-user').textContent=signed?authUser.name||authUser.email:'';$('sync').hidden=signed;$('sync').textContent='Entrar';renderSettings();}
-if(!window.__controleModule){window.__controleModule=true;const script=document.createElement('script');script.src='/controle.js?v=20260921-2';document.body.append(script);}
+if(!window.__controleModule){window.__controleModule=true;const script=document.createElement('script');script.src='/controle.js?v=20260921-4';document.body.append(script);}
 function groups(){const map=new Map();for(const r of data.records){const key=r.tool||'Código não identificado';if(!map.has(key))map.set(key,[]);map.get(key).push(r);}for(const rows of map.values())rows.sort((a,b)=>sortDate(b).localeCompare(sortDate(a))||b.received.localeCompare(a.received));return map;}
 function latest(rows){const map=new Map();for(const r of rows){if(!map.has(r.sequence))map.set(r.sequence,r);}return [...map.values()];}
 function badge(s){return `<span class="badge ${esc(s)}">${esc(s)}</span>`;}
@@ -148,8 +148,8 @@ function render(){
  $('m-rejected').textContent=latestRows.filter(r=>r.status==='REPROVADO').length;
  $('m-total').textContent=data.records.length;
  $('m-review').textContent=`${latestRows.filter(r=>r.status==='REVISAR').length} sequência(s) a revisar`;
- const q=$('search').value.trim().toUpperCase(), status=$('status').value;
- const filtered=[...all].filter(([key,rows])=>key.includes(q)&&(!status||latest(rows).some(r=>r.status===status))).sort((a,b)=>a[0].localeCompare(b[0]));
+ const q=$('search').value.trim().toUpperCase(), status=$('status').value, order=$('tool-sort').value;
+ const filtered=[...all].filter(([key,rows])=>key.includes(q)&&(!status||latest(rows).some(r=>r.status===status))).sort((a,b)=>order==='recent'?sortDate(b[1][0]).localeCompare(sortDate(a[1][0]))||a[0].localeCompare(b[0],'pt-BR',{numeric:true,sensitivity:'base'}):a[0].localeCompare(b[0],'pt-BR',{numeric:true,sensitivity:'base'}));
  if(!filtered.some(([key])=>key===selected))selected=filtered[0]?.[0]||'';
  $('count').textContent=`${filtered.length} ferramenta(s)`;
  $('tools').innerHTML=filtered.map(([key,rows])=>{const recent=latest(rows);const state=recent.some(r=>r.status==='REPROVADO')?'REPROVADO':recent.some(r=>r.status==='REVISAR')?'REVISAR':'APROVADO';return `<button class="tool ${key===selected?'active':''}" data-key="${esc(key)}"><strong>${esc(key)}</strong>${badge(state)}<small>${rows.length} teste(s) · ${recent.length} sequência(s)</small></button>`}).join('')||'<div class="empty">Nenhuma ferramenta encontrada.</div>';
@@ -163,7 +163,7 @@ function render(){
 }
 async function refresh(){try{const state=await(await fetch('/api/status')).json();canSync=state.canSync!==false;if(!authUser)$('sync').disabled=state.syncing;renderAuth();const response=await fetch('/api/data');const next=await response.json();if(!response.ok)throw Error(next.warnings?.[0]||'Serviço de dados indisponível.');if(next.updatedAt!==lastVersion||!lastVersion){data=productionLoaded?{...next,productionNotes:data.productionNotes,corrections:data.corrections,toolDrawings:data.toolDrawings}:next;lastVersion=next.updatedAt;render();}$('sync-state').textContent=state.syncing?'Consultando o Outlook e atualizando os dados…':data.updatedAt?`Última atualização: ${stamp(data.updatedAt)} · Atualização automática a cada 1 hora enquanto o painel estiver aberto.`:'Nenhuma coleta concluída. Abra Configurações e atualize os e-mails.';const warnings=[state.error,state.cloud?.error,...(data.warnings||[])].filter(Boolean);$('warning').hidden=!warnings.length;$('warning').textContent=warnings.join('\n');}catch(e){$('sync-state').textContent='Não foi possível consultar os dados: '+e.message;$('sync').disabled=false;}}
 async function startSync(){const response=await fetch('/api/sync',{method:'POST',headers:{'X-Painel':'local'}}),result=await response.json();if(response.status===401){authUser=null;renderAuth();$('login-dialog').showModal();return;}if(!response.ok)throw Error(result.error||'Não foi possível iniciar a coleta.');await refresh();}
-$('search').oninput=render;$('status').onchange=render;$('sync').onclick=()=>{if(!authUser){$('login-error').textContent='';$('login-dialog').showModal();$('login-email').focus();return;}openPage('settings');};
+$('search').oninput=render;$('status').onchange=render;$('tool-sort').onchange=render;$('sync').onclick=()=>{if(!authUser){$('login-error').textContent='';$('login-dialog').showModal();$('login-email').focus();return;}openPage('settings');};
 $('settings-email-sync').onclick=()=>startSync().catch(e=>$('settings-email-status').textContent=e.message);
 $('settings-production-import').onclick=()=>window.openProductionImport?.();$('settings-correction-import').onclick=()=>window.openCorrectionImport?.();
 $('login-cancel').onclick=()=>$('login-dialog').close();

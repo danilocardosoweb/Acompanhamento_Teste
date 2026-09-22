@@ -5,11 +5,48 @@ const {spawn} = require('child_process');
 const crypto = require('crypto');
 const {parseCorrections}=require('./importer.cjs');
 const {processDrawing}=require('./draw2data/processing.cjs');
+const {processDrawing:processDrawing1909}=require('./draw2data/historical-1909/processing.cjs');
 const {exportWorkbook}=require('./draw2data/exporter.cjs');
 const {renderDimensionSnapshot}=require('./draw2data/snapshot.cjs');
+const {buildUserFeedback}=require('./draw2data/dimension-decision.cjs');
+const {calculateEvaluationMetrics}=require('./draw2data/dimension-pipeline.cjs');
 const root = __dirname, port = Number(process.env.PORT || 4317);
 const cloud = require('./cloud.cjs')(root);
 let syncing = false, error = '', lastRun = '';
+const whatsappBotDir=path.join(root,'whatsapp-bot');
+const whatsappStatusFile=path.join(whatsappBotDir,'whatsapp-status.json');
+let whatsappBotProcess=null,whatsappBotRetryAt=0;
+function whatsappBotIsAlive(pid){if(!Number.isInteger(Number(pid))||Number(pid)<=0)return false;try{process.kill(Number(pid),0);return true;}catch{return false;}}
+function ensureWhatsappBot(){
+  // O bot pertence somente ao servidor oficial; ambientes de teste permanecem isolados.
+  if(port!==4317||process.env.WHATSAPP_BOT_AUTOSTART==='0'||!cloud.enabled())return;
+  if(whatsappBotProcess&&whatsappBotProcess.exitCode===null&&whatsappBotProcess.signalCode===null)return;
+  if(Date.now()<whatsappBotRetryAt)return;
+  try{
+    const status=JSON.parse(fs.readFileSync(whatsappStatusFile,'utf8'));
+    const age=Date.now()-Date.parse(status.updatedAt||'');
+    if(age>=0&&age<30000&&whatsappBotIsAlive(status.pid))return;
+  }catch{}
+  const entry=path.join(whatsappBotDir,'src','index.js');
+  if(!fs.existsSync(path.join(whatsappBotDir,'.env'))||!fs.existsSync(path.join(whatsappBotDir,'node_modules'))||!fs.existsSync(entry)){
+    whatsappBotRetryAt=Date.now()+60000;
+    return;
+  }
+  let logFd=null;
+  try{logFd=fs.openSync(path.join(whatsappBotDir,'bot.log'),'a');}catch{}
+  const child=spawn(process.execPath,[entry],{cwd:whatsappBotDir,windowsHide:true,stdio:['ignore',logFd??'ignore',logFd??'ignore']});
+  if(logFd!==null)try{fs.closeSync(logFd);}catch{}
+  whatsappBotProcess=child;
+  child.on('error',e=>{
+    whatsappBotRetryAt=Date.now()+30000;
+    try{fs.writeFileSync(whatsappStatusFile,JSON.stringify({connected:false,state:'error',message:`Não foi possível iniciar o bot: ${e.message}`,updatedAt:new Date().toISOString()}));}catch{}
+  });
+  child.on('exit',(code,signal)=>{
+    if(whatsappBotProcess===child)whatsappBotProcess=null;
+    whatsappBotRetryAt=Date.now()+30000;
+    try{fs.writeFileSync(whatsappStatusFile,JSON.stringify({connected:false,state:'offline',message:code===0?'Bot encerrado.':`Bot parou (${signal||`código ${code}`}); nova tentativa automática em breve.`,updatedAt:new Date().toISOString()}));}catch{}
+  });
+}
 let previewQueue=Promise.resolve();
 const previewJobs=new Map();
 const sessions=new Map();
@@ -76,6 +113,7 @@ async function correctionPreview(url){
 function sync() {
   if (syncing) return;
   syncing = true; error = '';
+  ensureWhatsappBot();
   const child = spawn('powershell.exe', ['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(root,'coletar.ps1')], {windowsHide:true});
   let output = '';
   const timeout = setTimeout(()=>{output='A leitura do Outlook demorou mais de 3 minutos. Verifique se existe um aviso de acesso no Outlook e tente atualizar novamente.';child.kill();},180000);
@@ -86,6 +124,7 @@ function sync() {
     if(code!==0){syncing=false;lastRun=new Date().toISOString();error=output||'Falha na coleta. Verifique o Outlook.';return;}
     try{await cloud.sync();}catch(e){error='Outlook atualizado, mas a sincronização dos dados falhou: '+e.message;}
     syncing=false;lastRun=new Date().toISOString();
+    ensureWhatsappBot();
   });
 }
 function json(res, code, body) {res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(body));}
@@ -100,8 +139,9 @@ const server = http.createServer((req,res) => {
     if(url.pathname === '/api/tool-drawing') {const user=authenticated(req);if(!user)return json(res,401,{error:'Faça login para associar o desenho.'});readBody(req,14*1024*1024).then(async body=>{try{const input=JSON.parse(body),file=drawingFile(input.file),tool=String(input.tool||'').trim().toUpperCase(),sequence=Number(input.sequence);if(!tool||!Number.isInteger(sequence)||sequence<1)throw Error('Ferramenta e sequência inválidas.');const result=await cloud.saveToolDrawing({id:crypto.randomUUID(),tool,sequence,name:file.name,bytes:file.bytes,user});json(res,200,{ok:true,...result});}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
     if(url.pathname === '/api/import-corrections') {const user=authenticated(req);if(!user)return json(res,401,{error:'Faça login para importar a planilha.'});readBody(req,16*1024*1024).then(async body=>{try{const input=JSON.parse(body),bytes=Buffer.from(String(input.data||''),'base64');if(!bytes.length||bytes.length>10*1024*1024||bytes[0]!==80||bytes[1]!==75)throw Error('Selecione um arquivo Excel .xlsx de até 10 MB.');const result=await parseCorrections(bytes,await cloud.read(true));if(input.expectedKind&&result.kind!==input.expectedKind)throw Error(input.expectedKind==='correction'?'Esta planilha não possui a coluna Correção Efetuada. Selecione a planilha de correções executadas.':'Esta planilha contém correções. Use o botão Importar correções na tela de Apontamentos.');if(input.confirm){const all=result.rows.filter(row=>row.status==='matched'||row.status==='new'),production=result.kind==='production',offset=Math.max(0,Number(input.offset)||0),limit=Math.min(50,Math.max(1,Number(input.limit)||25)),rows=production?all.slice(offset,offset+limit):all;await (production?cloud.importProduction(rows,user):cloud.importCorrections(rows,user));result.imported=rows.length;result.totalImportable=all.length;result.nextOffset=production?offset+rows.length:all.length;result.complete=!production||result.nextOffset>=all.length;}json(res,200,result);}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
     if(url.pathname === '/api/sync') {if(!authenticated(req))return json(res,401,{error:'Faça login para atualizar os e-mails.'});sync();return json(res,202,{syncing});}
-    if(url.pathname === '/api/draw2data/analyze') {readBody(req,110*1024*1024).then(async body=>{try{const input=JSON.parse(body),name=path.basename(String(input.fileName||''));if(!/\.pdf$/i.test(name)||!Array.isArray(input.data)||input.data.length<5||input.data.length>25*1024*1024)throw Error('Selecione um PDF de até 25 MB.');json(res,200,await processDrawing(name,Buffer.from(input.data),input.settings));}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
+    if(url.pathname === '/api/draw2data/analyze') {readBody(req,110*1024*1024).then(async body=>{try{const input=JSON.parse(body),name=path.basename(String(input.fileName||'')),engine=input.settings?.engine||'official';if(!/\.pdf$/i.test(name)||!Array.isArray(input.data)||input.data.length<5||input.data.length>25*1024*1024)throw Error('Selecione um PDF de até 25 MB.');if(!['official','historical-1909'].includes(engine))throw Error('Motor de leitura inválido.');const result=engine==='historical-1909'?await processDrawing1909(name,Buffer.from(input.data)):await processDrawing(name,Buffer.from(input.data),input.settings);result.engineSelection=engine;result.engineLabel=engine==='historical-1909'?'Histórico · 19/09':'Oficial · Atual';json(res,200,result);}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
     if(url.pathname === '/api/draw2data/snapshot') {readBody(req,110*1024*1024).then(async body=>{try{const input=JSON.parse(body),name=path.basename(String(input.fileName||''));if(!/\.pdf$/i.test(name)||!Array.isArray(input.data)||input.data.length<5||input.data.length>25*1024*1024)throw Error('Selecione um PDF de até 25 MB.');const image=await renderDimensionSnapshot(Buffer.from(input.data),input.dimension);json(res,200,{page:image.page,width:image.width,height:image.height,data:image.bytes.toString('base64')});}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
+    if(url.pathname === '/api/draw2data/feedback') {readBody(req,110*1024*1024).then(async body=>{try{const input=JSON.parse(body),candidate=input.candidate;if(!candidate||!['confirm','correct','exclude'].includes(input.userAction))throw Error('Feedback de cota inválido.');const id=crypto.randomUUID(),folder=path.join(root,'dados','draw2data-feedback'),cropFile=path.join(folder,`${id}.png`);fs.mkdirSync(folder,{recursive:true});let crop=null,documentId=crypto.createHash('sha1').update(path.basename(String(input.fileName||''))).digest('hex');if(Array.isArray(input.data)&&input.data.length>=5&&input.data.length<=25*1024*1024){const bytes=Buffer.from(input.data),image=await renderDimensionSnapshot(bytes,candidate);documentId=crypto.createHash('sha1').update(bytes).digest('hex');fs.writeFileSync(cropFile,image.bytes);crop=path.relative(root,cropFile).replace(/\\/g,'/');}const feedback={id,fileName:path.basename(String(input.fileName||'')),...buildUserFeedback(candidate,{correctedText:input.correctedText??null,userAction:input.userAction,classification:input.classification,crop,documentId})};fs.appendFileSync(path.join(folder,'feedback.jsonl'),JSON.stringify(feedback)+'\n','utf8');json(res,201,{ok:true,id,crop});}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
     if(url.pathname === '/api/control-profiles') {readBody(req,30*1024*1024).then(body=>{try{const input=JSON.parse(body),tool=String(input.tool||'').trim().toUpperCase(),dimensions=Array.isArray(input.dimensions)?input.dimensions.slice(0,500):[];if(!tool||!dimensions.length)throw Error('Informe a ferramenta e pelo menos uma cota.');const db=readControlDb(),sequence=input.sequence?Number(input.sequence):null,revision=String(input.revision||'00'),duplicate=db.profiles.find(p=>String(p.tool).toUpperCase()===tool&&(p.sequence??null)===sequence&&String(p.revision||'00')===revision);if(duplicate)throw Error(`Já existe um perfil ${tool} · Rev. ${revision}. Edite o perfil existente ou use outra revisão.`);const profile={id:crypto.randomUUID(),tool,sequence,revision,name:String(input.name||`${tool} - Perfil de controle`),dimensions,createdAt:new Date().toISOString(),active:true};if(Array.isArray(input.fileData)&&input.fileData.length){const folder=path.join(root,'dados','controle-desenhos');fs.mkdirSync(folder,{recursive:true});const fileName=`${profile.id}.pdf`;fs.writeFileSync(path.join(folder,fileName),Buffer.from(input.fileData));profile.drawingPath=`dados/controle-desenhos/${fileName}`;}db.profiles.unshift(profile);writeControlDb(db);json(res,201,profile);}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
     if(url.pathname === '/api/control-profiles/update') {readBody(req,30*1024*1024).then(body=>{try{const input=JSON.parse(body),db=readControlDb(),profile=db.profiles.find(p=>p.id===input.id);if(!profile)throw Error('Perfil não encontrado.');const tool=String(input.tool??profile.tool).trim().toUpperCase(),revision=String(input.revision||profile.revision||'00').trim();if(!tool||tool.length>80)throw Error('Informe um código de ferramenta válido.');const duplicate=db.profiles.find(p=>p.id!==profile.id&&String(p.tool).toUpperCase()===tool&&(p.sequence??null)===(profile.sequence??null)&&String(p.revision||'00')===revision);if(duplicate)throw Error(`Já existe um perfil ${tool} · Rev. ${revision}.`);const name=String(input.name??profile.name).trim();if(!name||name.length>200||revision.length>40)throw Error('Informe um nome e uma revisão válidos.');profile.tool=tool;profile.name=name;profile.revision=revision;if(input.active!==undefined)profile.active=input.active===true;if(Array.isArray(input.dimensions)){if(!input.dimensions.length||input.dimensions.length>500)throw Error('O perfil precisa conter entre 1 e 500 cotas.');profile.dimensions=input.dimensions;}if(Array.isArray(input.fileData)&&input.fileData.length){const folder=path.join(root,'dados','controle-desenhos');fs.mkdirSync(folder,{recursive:true});const fileName=`${profile.id}.pdf`;fs.writeFileSync(path.join(folder,fileName),Buffer.from(input.fileData));profile.drawingPath=`dados/controle-desenhos/${fileName}`;}profile.updatedAt=new Date().toISOString();writeControlDb(db);json(res,200,profile);}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
     if(url.pathname === '/api/control-profiles/delete') {readBody(req,32768).then(body=>{try{const input=JSON.parse(body),db=readControlDb(),index=db.profiles.findIndex(p=>p.id===input.id);if(index<0)throw Error('Perfil não encontrado.');if(db.inspections.some(i=>i.profileId===input.id))throw Error('Este perfil possui inspeções registradas e não pode ser excluído. Crie uma nova revisão ou arquive-o.');db.profiles.splice(index,1);writeControlDb(db);json(res,200,{ok:true});}catch(e){json(res,400,{error:e.message});}}).catch(e=>json(res,400,{error:e.message}));return;}
@@ -119,6 +159,7 @@ const server = http.createServer((req,res) => {
     return json(res,404,{});
   }
   if(req.method !== 'GET') return json(res,405,{});
+  if(url.pathname === '/api/draw2data/metrics') {const file=path.join(root,'dados','draw2data-feedback','feedback.jsonl');let records=[];try{records=fs.readFileSync(file,'utf8').split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line));}catch{}const metrics=calculateEvaluationMetrics(records),reasons=records.flatMap(row=>String(row.reason||'').split(',').filter(Boolean)).reduce((summary,key)=>(summary[key]=(summary[key]||0)+1,summary),{});return json(res,200,{...metrics,topReasons:Object.entries(reasons).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([reason,count])=>({reason,count}))});}
   if(url.pathname === '/api/auth') return json(res,200,{user:authenticated(req)});
   const reportMatch=url.pathname.match(/^\/api\/inspections\/([0-9a-f-]+)\/report$/i);if(reportMatch){const inspection=readControlDb().inspections.find(item=>item.id===reportMatch[1]);if(!inspection)return json(res,404,{error:'Inspeção não encontrada.'});const report=writeInspectionReport(inspection),name=`relatorio-dimensional-${String(inspection.tool||'perfil').replace(/[^a-z0-9_-]/gi,'-')}-${inspection.date||'inspecao'}.html`;res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Disposition':`attachment; filename="${name}"`,'Cache-Control':'no-store'});return res.end(report.html);}
   const evidenceMatch=url.pathname.match(/^\/api\/inspections\/([0-9a-f-]+)\/evidence\/([0-9a-f-]+)$/i);if(evidenceMatch){const inspection=readControlDb().inspections.find(item=>item.id===evidenceMatch[1]),evidence=inspection?.evidence?.find(item=>item.id===evidenceMatch[2]);if(!evidence?.path)return json(res,404,{error:'Evidência não encontrada.'});const file=path.resolve(root,evidence.path),folder=path.join(root,'dados','controle-evidencias')+path.sep;if(!file.startsWith(folder)||!fs.existsSync(file))return json(res,404,{error:'Arquivo de evidência não encontrado.'});res.writeHead(200,{'Content-Type':evidence.mimeType||'image/jpeg','Cache-Control':'private, max-age=60'});return fs.createReadStream(file).pipe(res);}
@@ -126,7 +167,7 @@ const server = http.createServer((req,res) => {
   if(url.pathname === '/api/control-profiles') return json(res,200,readControlDb().profiles);
   if(url.pathname === '/api/inspections') return json(res,200,readControlDb().inspections);
   if(url.pathname === '/api/status') return json(res,200,{syncing,error,lastRun,cloud:cloud.status()});
-  if(url.pathname === '/api/whatsapp-status') {if(!authenticated(req))return json(res,401,{error:'Faça login para verificar o WhatsApp.'});const statusFile=path.join(root,'whatsapp-bot','whatsapp-status.json');try{return json(res,200,JSON.parse(fs.readFileSync(statusFile,'utf8')));}catch{return json(res,200,{connected:false,state:'offline',message:'O bot ainda não foi iniciado neste computador.'});}}
+  if(url.pathname === '/api/whatsapp-status') {if(!authenticated(req))return json(res,401,{error:'Faça login para verificar o WhatsApp.'});try{const status=JSON.parse(fs.readFileSync(whatsappStatusFile,'utf8')),age=Date.now()-Date.parse(status.updatedAt||'');if(age<0||age>=30000||!whatsappBotIsAlive(status.pid))return json(res,200,{...status,connected:false,state:'offline',message:'O bot está parado. O servidor tentará iniciá-lo automaticamente.'});return json(res,200,status);}catch{return json(res,200,{connected:false,state:'offline',message:'O bot ainda não foi iniciado neste computador.'});}}
   if(url.pathname === '/api/whatsapp-summary-status' && req.method === 'GET') {if(!authenticated(req))return json(res,401,{error:'Faça login para consultar o envio.'});const id=String(url.searchParams.get('id')||'').replace(/[^a-f0-9-]/gi,'');if(!id)return json(res,400,{error:'Envio inválido.'});const resultFile=path.join(root,'whatsapp-bot',`whatsapp-summary-result-${id}.json`);try{return json(res,200,JSON.parse(fs.readFileSync(resultFile,'utf8')));}catch{return json(res,200,{id,state:'pending',message:'O bot ainda está processando o resumo.'});}}
   if(url.pathname === '/api/whatsapp-settings' && req.method === 'GET') {if(!authenticated(req))return json(res,401,{error:'Faça login para configurar as notificações.'});cloud.whatsappSettings().then(value=>json(res,200,value)).catch(e=>json(res,502,{error:e.message}));return;}
   if(url.pathname === '/api/whatsapp-notifications' && req.method === 'GET') {if(!authenticated(req))return json(res,401,{error:'Faça login para ver o histórico.'});cloud.whatsappNotifications().then(value=>json(res,200,value)).catch(e=>json(res,502,{error:e.message}));return;}
@@ -181,4 +222,4 @@ const server = http.createServer((req,res) => {
   fs.readFile(file,(err,buf)=>{if(err)return json(res,404,{});res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(buf);});
 });
 server.on('error',e=>{if(e.code==='EADDRINUSE')process.exit(0);console.error(e);process.exit(1);});
-server.listen(port,'127.0.0.1',()=>{console.log(`Painel local: http://127.0.0.1:${port}\nDados conectados. Atualização automática a cada 1 hora enquanto o painel estiver aberto.`);sync();setInterval(sync,60*60*1000);});
+server.listen(port,'127.0.0.1',()=>{console.log(`Painel local: http://127.0.0.1:${port}\nDados conectados. Atualização automática a cada 1 hora enquanto o painel estiver aberto.`);sync();setInterval(sync,60*60*1000);if(port===4317&&process.env.WHATSAPP_BOT_AUTOSTART!=='0')setInterval(ensureWhatsappBot,15000);});

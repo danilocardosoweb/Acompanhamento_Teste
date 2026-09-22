@@ -12,6 +12,9 @@ set /p "SOURCE=Origem dos PDFs [%SOURCE%]: "
 if "%SOURCE%"=="" set "SOURCE=U:\"
 set /p "OUTPUT=Pasta de resultados [%OUTPUT%]: "
 if "%OUTPUT%"=="" set "OUTPUT=%USERPROFILE%\Documents\Draw2Data-Resultados\pasta-23101f3e"
+rem Evita que a barra invertida final escape a aspa ao passar caminhos ao Node.
+if "%SOURCE:~-1%"=="\" set "SOURCE=%SOURCE%."
+if "%OUTPUT:~-1%"=="\" set "OUTPUT=%OUTPUT%."
 
 echo.
 echo  1. Continuar desenhos ainda nao analisados
