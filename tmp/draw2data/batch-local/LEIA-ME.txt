@@ -1,0 +1,27 @@
+DRAW2DATA · ANÁLISE LOCAL EM LOTE
+
+Execute “Executar lote.cmd”. Informe a pasta de origem quando solicitado. O programa aceita uma unidade mapeada, por exemplo U:\, ou um endereço UNC, por exemplo \\192.168.0.202\dados$\pdf produtos.
+
+Para conferir o que falta sem analisar nenhum PDF novamente, execute “Auditar lote.cmd”. A auditoria compara a pasta atual com o checkpoint e gera auditoria-do-lote.xlsx e auditoria-do-lote.json. No Excel, confira “Pendentes” (não analisados, alterados, falhas e motor antigo), “Sem cotas” (inclui casos como DIN-005), “Cotas revisar” (itens ainda não confirmados), “Origem não localizada” e “Falhas de acesso”. A rotina não modifica o checkpoint nem envia dados ao app ou ao Supabase. Também pode ser chamada com --audit-only=true.
+
+Também aceita opções diretas para automação: node tmp\draw2data\batch-local\analisar-lote.cjs --folder="U:\\" --recursive=true --mode=complete --pages=10 --output="C:\\Draw2Data\\Lote-1". Por padrão, processa todos os PDFs pendentes até o último encontrado. Use --batch=100 somente se quiser impor manualmente um limite por execução; --batch=0 também significa todos.
+
+Por segurança, a execução é sequencial e contínua até o último PDF pendente, sem pausar a cada 100. A cada 100 leituras (e no fim) mostra tempo decorrido, média por arquivo, falhas e estimativa do tempo restante. O padrão processa todos os pendentes; limite por rodada só se você passar --batch=N. A automação salva o checkpoint após cada PDF. Ao reabrir, aceite a pasta de resultados sugerida (ela recupera o último local usado para essa origem); os arquivos já concluídos serão pulados e a contagem continuará do progresso geral. Se a janela fechar durante um PDF, apenas esse arquivo é repetido. Falhas são registradas com uma possível causa e puladas na retomada; para tentar novamente falhas anteriores, responda S à pergunta exibida ou use --retry-failures=true. PDFs novos, alterados ou analisados por uma versão anterior do motor continuam pendentes automaticamente. O modo completo da automação local ativa a recuperação ampliada de cotas pequenas para todos os perfis; isso marca os arquivos antigos como pendentes uma vez para reanalisá-los com a melhoria. Para desenhos BC, também prioriza a vista à direita e pode ignorar páginas de embalagem quando outra página contém evidência do perfil.
+
+Arquivos gerados na pasta de resultados:
+- relatorio-do-lote.xlsx: resumo por PDF, cotas reconhecidas e falhas.
+- manifesto-perfis.json: cotas estruturadas com os caminhos dos PDFs de origem.
+- evidencias/: um recorte PNG por cota localizada, com a região lida destacada em verde. Na aba “Cotas” do Excel, a coluna “Evidência visual” abre o recorte correspondente. Cotas sem coordenada válida ficam sinalizadas para conferência no PDF original.
+- checkpoint.json: estado retomável do lote. Um índice local em Documentos\Draw2Data-Resultados\.resume-index lembra a pasta de saída usada para sugeri-la na próxima execução.
+- progresso-lote.json: indicadores atualizados a cada arquivo, úteis para consultar o estado mesmo durante a execução.
+- A aba “Indicadores” do Excel registra o tempo e o ritmo da última rodada. Na aba “Falhas”, cada PDF com problema inclui uma possível causa.
+- falhas-e-pastas.json: erros de leitura e subpastas sem acesso.
+- auditoria-do-lote.xlsx / auditoria-do-lote.json: inventário cruzado entre os PDFs localizados e o checkpoint, com versões antigas, arquivos não analisados/alterados, falhas, PDFs sem cotas, itens a revisar, evidências ausentes e arquivos registrados cuja origem não foi localizada. A auditoria é atualizada no início, a cada 100 leituras e no fim; se a janela fechar, use “Auditar lote.cmd” para recalcular com o checkpoint mais recente.
+
+Os exemplos 42-0312, 42-314, 45-157B, AG-012 SB e BC-002 são reconhecidos como códigos pelo nome. A sequência de produção não faz parte do perfil do desenho: o perfil representa as cotas padrão da ferramenta, e o operador informa a sequência no Controle Dimensional durante cada inspeção. A revisão do desenho pode ser inferida quando houver marcador como REV02; sem marcador, fica como Rev. 00 para conferência. Arquivos repetidos com a mesma ferramenta/revisão são marcados como possível conflito, sem sobrescrever nada.
+
+O manifesto é uma preparação para importação, não uma gravação no Supabase. Revise as abas “Arquivos” e “Cotas” e abra as evidências visuais antes de qualquer carga. As miniaturas de conferência e relatórios ficam na pasta local de saída. Os desenhos originais permanecem na pasta de rede e não são copiados nem enviados.
+
+Após alterar o código do processador no projeto, rode: node tmp\draw2data\batch-local\test.cjs
+
+Para reprocessar todos os PDFs desde o zero, use Executar lote.cmd ou acrescente --from-scratch=true. O checkpoint anterior é preservado automaticamente com sufixo .anterior.
