@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Painel local para acompanhar testes e correções de ferramentas da Tecnoperfil.",
   "scripts": {
-    "test": "node draw2data/lab-engine.test.cjs"
+    "test": "node draw2data/lab-engine.test.cjs && node whatsapp-bot/src/whatsapp-message.test.js"
   },
   "repository": {
     "type": "git",

@@ -215,7 +215,15 @@ Deno.serve(async req=>{
    }
    const uniqueRows=[...new Map(rows.map(row=>[row.id,row])).values()],previousRows=await(await api('/rest/v1/quality_tests?select=id,result')).json(),previousById=new Map(previousRows.map(row=>[row.id,row.result]));
    if(uniqueRows.length)await upsert('quality_tests',uniqueRows);
-   for(const row of uniqueRows){const previous=previousById.get(row.id);if(previous===undefined){await enqueueWhatsapp({type:'novo_teste',key:`test:new:${row.id}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number,reason:row.comment},at:row.received_at});}if((previous===undefined||previous!==row.result)&&row.result==='APROVADO')await enqueueWhatsapp({type:'ferramenta_aprovada',key:`test:approved:${row.id}:${row.result}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number},at:row.received_at});if((previous===undefined||previous!==row.result)&&row.result==='REPROVADO')await enqueueWhatsapp({type:'ferramenta_reprovada',key:`test:rejected:${row.id}:${row.result}`,entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata:{test:row.test_number,reason:row.comment},at:row.received_at});}
+   for(const row of uniqueRows){
+    const previous=previousById.get(row.id),changed=previous===undefined||previous!==row.result;
+    if(!changed)continue;
+    const metadata={test:row.test_number,reason:row.comment,subject:row.subject,emailBody:row.email_body};
+    const common={entityId:row.id,tool:row.tool,status:row.result,message:row.comment,metadata,at:row.received_at};
+    if(row.result==='APROVADO')await enqueueWhatsapp({type:'ferramenta_aprovada',key:`test:approved:${row.id}:${row.result}`,...common});
+    else if(row.result==='REPROVADO')await enqueueWhatsapp({type:'ferramenta_reprovada',key:`test:rejected:${row.id}:${row.result}`,...common});
+    else await enqueueWhatsapp({type:'novo_teste',key:`test:review:${row.id}:${row.result}`,...common});
+   }
    if(files.length)await upsert('quality_attachments',files);
    await upsert('quality_sync_state',{id:'outlook-pcp',data:{updatedAt:data.updatedAt,source:data.source,fepSource:data.fepSource||'',warnings:data.warnings||[],skipped:data.skipped,fepRecords:data.fepRecords||[]},synced_at:new Date().toISOString()});
    return respond({ok:true,records:rows.length,fepRecords:(data.fepRecords||[]).length,attachments:files.length});
