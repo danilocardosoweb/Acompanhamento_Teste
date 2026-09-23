@@ -12,7 +12,7 @@ function buildMonthlySummary(records=[],now=new Date()){
   const key=`${String(row.tool||'').trim().toUpperCase()}|${String(row.sequence||'').trim()}`;
   if(String(row.status||'').toUpperCase()==='APROVADO'&&receivedMonth(row)===month&&!approvals.has(key))approvals.set(key,row);
  }
- const approvedThisMonth=[...approvals.values()].map(row=>({tool:row.tool||'Ferramenta não identificada',sequence:row.sequence||'—',date:dayLabel(row.received||row.testDate)}));
+ const approvedThisMonth=[...approvals.values()].map(row=>({tool:row.tool||'Ferramenta não identificada',sequence:row.sequence||'—',date:dayLabel(row.approvalDate||row.received||row.testDate)}));
  const notApproved=current.filter(row=>String(row.status||'').toUpperCase()!=='APROVADO')
   .sort((a,b)=>(parseDate(b.received||b.testDate)?.getTime()||0)-(parseDate(a.received||a.testDate)?.getTime()||0))
   .map(row=>{const key=`${String(row.tool||'').trim().toUpperCase()}|${String(row.sequence||'').trim()}`;return {tool:row.tool||'Ferramenta não identificada',sequence:row.sequence||'—',status:['REPROVADO','REVISAR'].includes(String(row.status||'').toUpperCase())?String(row.status).toUpperCase():'REVISAR',date:dayLabel(row.received||row.testDate),testCount:testCounts.get(key)||1};});
