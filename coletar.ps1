@@ -70,7 +70,10 @@ foreach ($mail in $items) {
     if ($normalized -match '(?i)SEQ[.\s:-]*(\d+)') { $seq = $Matches[1].PadLeft(2,'0') }
     if ($normalized -match '(?i)TESTE\s+(\d+)\s*$') { $test = $Matches[1] }
     $topBody = ($body -split '(?im)^\s*(De:|From:|Enviada em:)')[0]
-    $statuses = @([regex]::Matches($topBody, '(?i)\bDimensional\s+(APROVADO|REPROVADO)\b') | ForEach-Object { $_.Groups[1].Value.ToUpper() } | Select-Object -Unique)
+    # Os e-mails usam mais de uma forma para informar o resultado. Aceitar
+    # "Teste APROVADO", "Dimensional APROVADO" e "APROVADO para...", sem
+    # classificar textos que apenas mencionam a palavra aprovação.
+    $statuses = @([regex]::Matches($topBody, '(?i)(?:\bDimensional|\bTeste|\bTeste\s+\w+|\bResultado)\s+(APROVADO|REPROVADO)\b|\b(APROVADO|REPROVADO)\s+(?=para\s+(?:a\s+)?pe[cç]a|no\s+teste|na\s+inspe[cç]a)') | ForEach-Object { if ($_.Groups[1].Success) { $_.Groups[1].Value.ToUpper() } else { $_.Groups[2].Value.ToUpper() } } | Select-Object -Unique)
     $status = 'REVISAR'
     if ($statuses.Count -eq 1) { $status = $statuses[0] }
     if ($topBody -match '\b(\d{2}/\d{2}/\d{4})\b') {
