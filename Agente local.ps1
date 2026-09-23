@@ -1,0 +1,22 @@
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$ErrorActionPreference='SilentlyContinue'
+$base=Split-Path -Parent $MyInvocation.MyCommand.Path
+$agent=Join-Path $base 'agente-local\agent.cjs'
+$node='C:\Program Files\nodejs\node.exe'
+$existing=Get-Process node -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $node}
+if(-not $existing){Start-Process $node $agent -WorkingDirectory $base -WindowStyle Hidden}
+Start-Sleep -Milliseconds 700
+$form=New-Object Windows.Forms.Form
+$form.Text='Agente Local Draw2Data';$form.Size=New-Object Drawing.Size(930,650);$form.StartPosition='CenterScreen';$form.BackColor=[Drawing.Color]::FromArgb(17,27,45);$form.ForeColor=[Drawing.Color]::White
+$title=New-Object Windows.Forms.Label;$title.Text='Agente Local Draw2Data';$title.Font=New-Object Drawing.Font('Segoe UI',22,[Drawing.FontStyle]::Bold);$title.Location=New-Object Drawing.Point(34,24);$title.AutoSize=$true;$form.Controls.Add($title)
+$sub=New-Object Windows.Forms.Label;$sub.Text='Automação local de Outlook e WhatsApp';$sub.ForeColor=[Drawing.Color]::LightSteelBlue;$sub.Location=New-Object Drawing.Point(36,64);$sub.AutoSize=$true;$form.Controls.Add($sub)
+$status=New-Object Windows.Forms.Label;$status.Text='Consultando...';$status.Location=New-Object Drawing.Point(700,42);$status.AutoSize=$true;$status.ForeColor=[Drawing.Color]::DeepSkyBlue;$form.Controls.Add($status)
+$cards=@{}; $names=@('Servidor local','WhatsApp','Outlook'); for($i=0;$i -lt 3;$i++){ $p=New-Object Windows.Forms.Panel;$p.Location=New-Object Drawing.Point((34+$i*295),110);$p.Size=New-Object Drawing.Size(275,90);$p.BackColor=[Drawing.Color]::FromArgb(25,37,59);$form.Controls.Add($p);$l=New-Object Windows.Forms.Label;$l.Text=$names[$i];$l.Font=New-Object Drawing.Font('Segoe UI',10);$l.ForeColor=[Drawing.Color]::LightSteelBlue;$l.Location=New-Object Drawing.Point(18,14);$l.AutoSize=$true;$p.Controls.Add($l);$v=New-Object Windows.Forms.Label;$v.Text='—';$v.Font=New-Object Drawing.Font('Segoe UI',16,[Drawing.FontStyle]::Bold);$v.Location=New-Object Drawing.Point(18,42);$v.AutoSize=$true;$p.Controls.Add($v);$cards[$names[$i]]=$v }
+function Invoke-Agent([string]$action){try{Invoke-WebRequest "http://127.0.0.1:4320/action/$action" -Method Post | Out-Null}catch{}}
+$buttons=@(@('Iniciar serviços','start'),@('Sincronizar e-mails','sync'),@('Parar serviços','stop'));for($i=0;$i -lt $buttons.Count;$i++){ $b=New-Object Windows.Forms.Button;$b.Text=$buttons[$i][0];$b.Tag=$buttons[$i][1];$b.Location=New-Object Drawing.Point((34+$i*190),225);$b.Size=New-Object Drawing.Size(175,42);$b.FlatStyle='Flat';$b.BackColor=[Drawing.Color]::FromArgb(61,132,245);$b.ForeColor=[Drawing.Color]::White;$b.Add_Click({Invoke-Agent $this.Tag;Update-Status});$form.Controls.Add($b)}
+$open=New-Object Windows.Forms.Button;$open.Text='Abrir painel web';$open.Location=New-Object Drawing.Point(604,225);$open.Size=New-Object Drawing.Size(175,42);$open.FlatStyle='Flat';$open.BackColor=[Drawing.Color]::FromArgb(43,59,85);$open.ForeColor=[Drawing.Color]::White;$open.Add_Click({Start-Process 'http://127.0.0.1:4317'});$form.Controls.Add($open)
+$last=New-Object Windows.Forms.Label;$last.Text='Última atividade';$last.Location=New-Object Drawing.Point(36,295);$last.AutoSize=$true;$last.ForeColor=[Drawing.Color]::LightSteelBlue;$form.Controls.Add($last)
+$log=New-Object Windows.Forms.TextBox;$log.Multiline=$true;$log.ReadOnly=$true;$log.ScrollBars='Vertical';$log.BackColor=[Drawing.Color]::FromArgb(9,18,32);$log.ForeColor=[Drawing.Color]::LightSteelBlue;$log.Font=New-Object Drawing.Font('Consolas',10);$log.Location=New-Object Drawing.Point(34,325);$log.Size=New-Object Drawing.Size(845,235);$form.Controls.Add($log)
+function Update-Status{try{$s=(Invoke-RestMethod 'http://127.0.0.1:4320/status');$cards['Servidor local'].Text=if($s.server){'ATIVO'}else{'PARADO'};$cards['WhatsApp'].Text=if($s.bot){'ATIVO'}else{'PARADO'};$cards['Outlook'].Text=if($s.sync){'SINCRONIZANDO'}else{'AGUARDANDO'};$status.Text=if($s.lastError){'Atenção'}else{'Pronto'};$status.ForeColor=if($s.lastError){[Drawing.Color]::Tomato}else{[Drawing.Color]::LimeGreen};$last.Text="Última atividade: $($s.lastAction)";$log.Text=$s.log;if($s.lastError){$last.ForeColor=[Drawing.Color]::Tomato}else{$last.ForeColor=[Drawing.Color]::LightSteelBlue}}catch{$status.Text='Agente iniciando...'}}
+$timer=New-Object Windows.Forms.Timer;$timer.Interval=2500;$timer.Add_Tick({Update-Status});$timer.Start();$form.Add_Shown({Update-Status});$form.Add_FormClosed({$timer.Stop()});[void]$form.ShowDialog()
