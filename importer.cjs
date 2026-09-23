@@ -11,7 +11,7 @@ function summary(rows){return {total:rows.length,matched:rows.filter(r=>r.status
 async function parseCorrections(bytes,current){
  const sheet=await readSheet(bytes),info=headerInfo(sheet);
  if(!info)throw Error('Não foi possível localizar as colunas Lote e Ferramenta no Excel.');
- const correctionIndex=field(info.cells,'CORRECAO EFETUADA'),productionDateIndex=field(info.cells,'DATA PRODUCAO');
+ const correctionIndex=field(info.cells,'CORRECAO EFETUADA'),productionDateIndex=field(info.cells,'DATA PRODUCAO','DATA','DIA');
  const notes=(current.productionNotes?.length?current.productionNotes:current.corrections)||[],tests=current.records||[];
  if(correctionIndex>=0){
   const source=sheet.slice(info.row+1).filter(row=>text(row[info.lot])&&text(row[info.tool])&&text(row[correctionIndex]));
@@ -37,3 +37,4 @@ async function parseCorrections(bytes,current){
  return {kind:'production',rows,summary:summary(rows)};
 }
 module.exports={parseCorrections};
+
