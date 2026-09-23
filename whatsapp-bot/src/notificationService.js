@@ -1,5 +1,8 @@
 const {buildMessage}=require('./messageTemplates');
 const log=require('./logger');
+const fs=require('fs'),path=require('path');
+const {MessageMedia}=require('whatsapp-web.js');
+function localImagesFor(row){try{const data=JSON.parse(fs.readFileSync(path.join(__dirname,'..','..','dados','testes.json'),'utf8'));const record=(data.records||[]).find(item=>item.id===row.entity_id||item.id===row.entityId);return (record?.attachments||[]).map(a=>path.resolve(path.join(__dirname,'..','..',a.path))).filter(file=>/\.(png|jpe?g|webp)$/i.test(file)&&fs.existsSync(file)).slice(0,8);}catch{return [];}}
 function createNotificationService(supabase,client){
  const workerId=process.env.WORKER_ID||'quality-whatsapp-windows';
  let processing=false;
@@ -13,6 +16,7 @@ function createNotificationService(supabase,client){
    let delivered=false;
    try{
     await client.sendMessage(row.whatsapp_group_id,buildMessage(row));
+    for(const file of localImagesFor(row)) await client.sendMessage(row.whatsapp_group_id,MessageMedia.fromFilePath(file));
     delivered=true;
     const payload={delivery_status:'enviado',sent_at:new Date().toISOString(),locked_at:null,locked_by:null,updated_at:new Date().toISOString()};
     // A confirmação pode sofrer uma falha transitória. Tentar novamente evita

@@ -86,7 +86,7 @@ foreach ($mail in $items) {
     for ($i=1; $i -le $mail.Attachments.Count; $i++) {
       $a = $mail.Attachments.Item($i)
       $name = [IO.Path]::GetFileName([string]$a.FileName) -replace '[<>:"/\\|?*\x00-\x1F]', '_'
-      if ([IO.Path]::GetExtension($name) -notmatch '^(?i)\.(xlsx|xls|xlsm|xlsb|csv|pdf)$') { continue }
+      if ([IO.Path]::GetExtension($name) -notmatch '^(?i)\.(xlsx|xls|xlsm|xlsb|csv|pdf|jpg|jpeg|png|webp)$') { continue }
       $inline = $false
       try { $inline = [bool]$a.PropertyAccessor.GetProperty('http://schemas.microsoft.com/mapi/proptag/0x7FFE000B') } catch {}
       if ($inline) { continue }

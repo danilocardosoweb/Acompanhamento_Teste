@@ -37,7 +37,7 @@ module.exports=function(root){
    await request('setup',{method:'POST'});
    const data=JSON.parse(fs.readFileSync(path.join(root,'dados/testes.json'),'utf8'));
    let uploaded={};try{uploaded=JSON.parse(fs.readFileSync(uploadPath,'utf8'));}catch{}
-   async function upload(object,file){const bytes=fs.readFileSync(file),sha=digest(bytes);if(uploaded[object]===sha)return;const ext=path.extname(file).toLowerCase();const type={'.pdf':'application/pdf','.png':'image/png','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','.csv':'text/csv'}[ext]||'application/octet-stream';await request('file',{method:'PUT',body:bytes,type,object});uploaded[object]=sha;fs.writeFileSync(uploadPath,JSON.stringify(uploaded));}
+   async function upload(object,file){const bytes=fs.readFileSync(file),sha=digest(bytes);if(uploaded[object]===sha)return;const ext=path.extname(file).toLowerCase();const type={'.pdf':'application/pdf','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','.csv':'text/csv'}[ext]||'application/octet-stream';await request('file',{method:'PUT',body:bytes,type,object});uploaded[object]=sha;fs.writeFileSync(uploadPath,JSON.stringify(uploaded));}
    let count=0;
    for(const record of data.records){for(const a of record.attachments){
     const file=path.resolve(root,a.path);if(!file.startsWith(path.join(root,'anexos')+path.sep))throw Error('Caminho de anexo inválido.');

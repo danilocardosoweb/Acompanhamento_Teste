@@ -34,7 +34,7 @@ function buildMessage(row){return templates[row.event_type]?.(row)||plainText(ro
 function buildSummaryMessage(summary={},createdAt=new Date()){
  const month=summary.monthLabel||new Date(createdAt).toLocaleDateString('pt-BR',{month:'long',year:'numeric',timeZone:'America/Sao_Paulo'});
  const approved=(summary.approvedThisMonth||[]).slice(0,20).map(item=>`• ${item.tool}${item.sequence&&item.sequence!=='—'?` · Seq. ${item.sequence}`:''} · ${item.date||'data não informada'}`);
- const pending=(summary.notApproved||[]).slice(0,20).map(item=>`• ${item.status==='REPROVADO'?'🔴':'🟠'} ${item.tool}${item.sequence&&item.sequence!=='—'?` · Seq. ${item.sequence}`:''} · ${statusLabel(item.status)}${item.date?` · ${item.date}`:''}`);
+ const pending=(summary.notApproved||[]).slice(0,20).map(item=>`• ${item.status==='REPROVADO'?'🔴':'🟠'} ${item.tool}${item.sequence&&item.sequence!=='—'?` · Seq. ${item.sequence}`:''} · ${statusLabel(item.status)} · ${item.testCount||1} teste(s)${item.date?` · ${item.date}`:''}`);
  const overflow=(items)=>items.length>20?`\n• e mais ${items.length-20} registro(s)`:'';
  return [
   `📊 *ACOMPANHAMENTO DA QUALIDADE*`,

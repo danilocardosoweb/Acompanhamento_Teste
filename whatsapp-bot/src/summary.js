@@ -5,6 +5,7 @@ function buildMonthlySummary(records=[],now=new Date()){
  const ordered=[...rows].sort((a,b)=>(parseDate(b.received||b.testDate)?.getTime()||0)-(parseDate(a.received||a.testDate)?.getTime()||0));
  for(const row of ordered){const tool=String(row.tool||'').trim(),sequence=String(row.sequence||'').trim(),key=`${tool.toUpperCase()}|${sequence}`;if(tool&&!latest.has(key))latest.set(key,row);}
  const current=[...latest.values()],month=now.toLocaleDateString('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit'});
+ const testCounts=new Map(); for(const row of rows){const key=`${String(row.tool||'').trim().toUpperCase()}|${String(row.sequence||'').trim()}`;testCounts.set(key,(testCounts.get(key)||0)+1);}
  const receivedMonth=row=>{const date=parseDate(row.received||row.testDate);return date?date.toLocaleDateString('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit'}):'';};
  const approvals=new Map();
  for(const row of [...rows].sort((a,b)=>(parseDate(b.received||b.testDate)?.getTime()||0)-(parseDate(a.received||a.testDate)?.getTime()||0))){
@@ -14,7 +15,7 @@ function buildMonthlySummary(records=[],now=new Date()){
  const approvedThisMonth=[...approvals.values()].map(row=>({tool:row.tool||'Ferramenta não identificada',sequence:row.sequence||'—',date:dayLabel(row.received||row.testDate)}));
  const notApproved=current.filter(row=>String(row.status||'').toUpperCase()!=='APROVADO')
   .sort((a,b)=>(parseDate(b.received||b.testDate)?.getTime()||0)-(parseDate(a.received||a.testDate)?.getTime()||0))
-  .map(row=>({tool:row.tool||'Ferramenta não identificada',sequence:row.sequence||'—',status:['REPROVADO','REVISAR'].includes(String(row.status||'').toUpperCase())?String(row.status).toUpperCase():'REVISAR',date:dayLabel(row.received||row.testDate)}));
+  .map(row=>{const key=`${String(row.tool||'').trim().toUpperCase()}|${String(row.sequence||'').trim()}`;return {tool:row.tool||'Ferramenta não identificada',sequence:row.sequence||'—',status:['REPROVADO','REVISAR'].includes(String(row.status||'').toUpperCase())?String(row.status).toUpperCase():'REVISAR',date:dayLabel(row.received||row.testDate),testCount:testCounts.get(key)||1};});
  const count=status=>current.filter(row=>String(row.status||'').toUpperCase()===status).length;
  return {month,monthLabel:now.toLocaleDateString('pt-BR',{month:'long',year:'numeric',timeZone:'America/Sao_Paulo'}),tools:new Set(current.map(row=>String(row.tool||'').trim().toUpperCase()).filter(Boolean)).size,sequences:current.length,approved:count('APROVADO'),rejected:count('REPROVADO'),review:count('REVISAR'),approvedThisMonth,notApproved};
 }
